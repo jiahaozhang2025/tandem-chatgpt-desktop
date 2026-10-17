@@ -451,10 +451,15 @@ Describe 'install.ps1' {
             Set-Content -LiteralPath $_.FullName -Stream Zone.Identifier -Value "[ZoneTransfer]`r`nZoneId=3"
         }
         $dest = Join-Path $TestDrive 'installed'
-        $null = & (Join-Path $src 'install.ps1') -Destination $dest
+        # Run it the way the README says, in the same PowerShell edition as the tests. The
+        # Bypass matters: a marked install.ps1 would not run under RemoteSigned.
+        $hostExe = (Get-Process -Id $PID).Path
+        $null = & $hostExe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $src 'install.ps1') -Destination $dest
+        $installExit = $LASTEXITCODE
     }
 
     It 'installs the scripts, module and cmd shim' {
+        $installExit | Should -Be 0
         foreach ($file in 'chatgpt-profile.ps1', 'chatgpt-profile.cmd', 'uninstall.ps1', 'README.md', 'LICENSE',
             'tandem-chatgpt-desktop\tandem-chatgpt-desktop.psd1', 'tandem-chatgpt-desktop\tandem-chatgpt-desktop.psm1') {
             Join-Path $dest $file | Should -Exist
@@ -468,5 +473,11 @@ Describe 'install.ps1' {
         $marked = @(Get-ChildItem -LiteralPath $dest -Recurse -File |
                 Where-Object { Get-Item -LiteralPath $_.FullName -Stream Zone.Identifier -ErrorAction SilentlyContinue })
         $marked.FullName | Should -BeNullOrEmpty
+    }
+
+    It 'leaves a module that imports under a RemoteSigned execution policy' {
+        $manifest = Join-Path $dest 'tandem-chatgpt-desktop\tandem-chatgpt-desktop.psd1'
+        $count = & $hostExe -NoProfile -ExecutionPolicy RemoteSigned -Command "Import-Module '$manifest' -ErrorAction Stop; (Get-Command -Module tandem-chatgpt-desktop).Count"
+        $count | Should -Be '6'
     }
 }
