@@ -19,9 +19,11 @@ Tested with ChatGPT 26.1013.3656.0 on Windows 11 (build 26200).
 
 ## Install
 
-Download this repository (or clone it), then run from its folder:
+Download this repository (**Code > Download ZIP**, then extract it) or clone it, then run the installer from its folder:
 
 ```powershell
+git clone https://github.com/jiahaozhang2025/chatgpt-side-by-side.git
+cd chatgpt-side-by-side
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 

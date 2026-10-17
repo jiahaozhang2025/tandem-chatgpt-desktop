@@ -21,7 +21,8 @@
     PrivateData          = @{
         PSData = @{
             Tags       = @('ChatGPT', 'Codex', 'Windows', 'MultiAccount', 'Profiles')
-            LicenseUri = 'https://opensource.org/licenses/MIT'
+            LicenseUri = 'https://github.com/jiahaozhang2025/chatgpt-side-by-side/blob/main/LICENSE'
+            ProjectUri = 'https://github.com/jiahaozhang2025/chatgpt-side-by-side'
         }
     }
 }
