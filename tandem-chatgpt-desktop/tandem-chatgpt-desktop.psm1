@@ -1,6 +1,6 @@
 #Requires -Version 5.1
 <#
-ChatGPTSideBySide: run the ChatGPT desktop app for Windows (Microsoft Store package
+tandem-chatgpt-desktop: run the ChatGPT desktop app for Windows (Microsoft Store package
 OpenAI.Codex) as several isolated instances, one per account, side by side.
 
 How it works
@@ -38,17 +38,17 @@ $script:Palette = [ordered]@{
 #region Private helpers
 
 function Get-DefaultProfileRoot {
-    Join-Path -Path $env:USERPROFILE -ChildPath 'ChatGPTProfiles'
+    Join-Path -Path $env:USERPROFILE -ChildPath 'tandem-chatgpt-desktop'
 }
 
 function Resolve-ProfileRoot {
     param([Parameter(Mandatory)][string]$Root)
     $full = [IO.Path]::GetFullPath($Root).TrimEnd('\')
     if ($full.Length -le 2) {
-        throw "Profile root '$Root' is a drive root. Choose a folder, for example C:\ChatGPTProfiles."
+        throw "Profile root '$Root' is a drive root. Choose a folder, for example C:\tandem-chatgpt-desktop."
     }
     if ($full -match '[^\x20-\x7E]') {
-        throw "Profile root '$full' contains non-ASCII characters, which the cmd.exe launch wrapper cannot pass reliably. Use -Root with an ASCII-only folder, for example C:\ChatGPTProfiles."
+        throw "Profile root '$full' contains non-ASCII characters, which the cmd.exe launch wrapper cannot pass reliably. Use -Root with an ASCII-only folder, for example C:\tandem-chatgpt-desktop."
     }
     if ($full.Contains('%')) {
         throw "Profile root '$full' contains '%', which cmd.exe would expand. Choose another folder with -Root."
@@ -690,7 +690,7 @@ function Remove-ChatGPTProfile {
     }
 }
 
-function Test-ChatGPTSideBySide {
+function Test-ChatGPTProfileSupport {
     <#
     .SYNOPSIS
     Checks that this machine and the installed app version support side-by-side profiles.
@@ -698,7 +698,7 @@ function Test-ChatGPTSideBySide {
     -Deep also scans the app bundle (about 600 MB, a few seconds) to confirm the app
     still reads the two environment variables this tool relies on.
     .EXAMPLE
-    Test-ChatGPTSideBySide -Deep
+    Test-ChatGPTProfileSupport -Deep
     #>
     [CmdletBinding()]
     param(
@@ -744,4 +744,4 @@ function Test-ChatGPTSideBySide {
 
 #endregion
 
-Export-ModuleMember -Function New-ChatGPTProfile, Start-ChatGPTProfile, Stop-ChatGPTProfile, Get-ChatGPTProfile, Remove-ChatGPTProfile, Test-ChatGPTSideBySide
+Export-ModuleMember -Function New-ChatGPTProfile, Start-ChatGPTProfile, Stop-ChatGPTProfile, Get-ChatGPTProfile, Remove-ChatGPTProfile, Test-ChatGPTProfileSupport

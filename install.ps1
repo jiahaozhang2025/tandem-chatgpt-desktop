@@ -3,7 +3,7 @@
   Installs chatgpt-profile for the current user (no admin rights needed).
 
 .DESCRIPTION
-  Copies the scripts to %LOCALAPPDATA%\Programs\ChatGPTSideBySide (or -Destination)
+  Copies the scripts to %LOCALAPPDATA%\Programs\tandem-chatgpt-desktop (or -Destination)
   so profile shortcuts keep working after this folder is moved or deleted. Running it
   again upgrades in place; existing profiles and shortcuts are kept.
 
@@ -12,7 +12,7 @@
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param(
-    [string]$Destination = (Join-Path -Path $env:LOCALAPPDATA -ChildPath 'Programs\ChatGPTSideBySide')
+    [string]$Destination = (Join-Path -Path $env:LOCALAPPDATA -ChildPath 'Programs\tandem-chatgpt-desktop')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -24,13 +24,13 @@ if ($destinationPath -eq [IO.Path]::GetFullPath($source).TrimEnd('\')) {
 }
 
 if ($PSCmdlet.ShouldProcess($destinationPath, 'Install chatgpt-profile')) {
-    $moduleTarget = Join-Path -Path $destinationPath -ChildPath 'ChatGPTSideBySide'
+    $moduleTarget = Join-Path -Path $destinationPath -ChildPath 'tandem-chatgpt-desktop'
     $null = New-Item -ItemType Directory -Force -Path $moduleTarget
     foreach ($file in 'chatgpt-profile.ps1', 'uninstall.ps1', 'README.md', 'LICENSE') {
         Copy-Item -LiteralPath (Join-Path -Path $source -ChildPath $file) -Destination $destinationPath -Force
     }
-    foreach ($file in 'ChatGPTSideBySide.psd1', 'ChatGPTSideBySide.psm1') {
-        Copy-Item -LiteralPath (Join-Path -Path $source -ChildPath "ChatGPTSideBySide\$file") -Destination $moduleTarget -Force
+    foreach ($file in 'tandem-chatgpt-desktop.psd1', 'tandem-chatgpt-desktop.psm1') {
+        Copy-Item -LiteralPath (Join-Path -Path $source -ChildPath "tandem-chatgpt-desktop\$file") -Destination $moduleTarget -Force
     }
     # Lets cmd.exe and the Run dialog call the tool without typing powershell.exe.
     Set-Content -LiteralPath (Join-Path -Path $destinationPath -ChildPath 'chatgpt-profile.cmd') -Encoding Ascii -Value @(

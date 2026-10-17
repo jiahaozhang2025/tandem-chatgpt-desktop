@@ -1,4 +1,4 @@
-# ChatGPT side by side
+# tandem-chatgpt-desktop
 
 Run two (or more) ChatGPT desktop accounts at the same time on Windows, each in its own window with its own login.
 
@@ -22,17 +22,17 @@ Tested with ChatGPT 26.1013.3656.0 on Windows 11 (build 26200).
 Download this repository (**Code > Download ZIP**, then extract it) or clone it, then run the installer from its folder:
 
 ```powershell
-git clone https://github.com/jiahaozhang2025/chatgpt-side-by-side.git
-cd chatgpt-side-by-side
+git clone https://github.com/jiahaozhang2025/tandem-chatgpt-desktop.git
+cd tandem-chatgpt-desktop
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-This copies the scripts to `%LOCALAPPDATA%\Programs\ChatGPTSideBySide`. No admin rights needed. Run it again to upgrade; your profiles and shortcuts are kept.
+This copies the scripts to `%LOCALAPPDATA%\Programs\tandem-chatgpt-desktop`. No admin rights needed. Run it again to upgrade; your profiles and shortcuts are kept.
 
 ## Quick start
 
 ```powershell
-& "$env:LOCALAPPDATA\Programs\ChatGPTSideBySide\chatgpt-profile.cmd" new account2 -Label "Account 2"
+& "$env:LOCALAPPDATA\Programs\tandem-chatgpt-desktop\chatgpt-profile.cmd" new account2 -Label "Account 2"
 ```
 
 A **ChatGPT (Account 2)** shortcut with a colored badge appears on your desktop. Open it and sign in with your second account. Your usual ChatGPT icon keeps opening your main account, and both can stay open together.
@@ -48,10 +48,10 @@ A **ChatGPT (Account 2)** shortcut with a colored badge appears on your desktop.
 | `chatgpt-profile remove <name> [-KeepData] [-Force]` | Remove the profile's shortcuts and, unless `-KeepData`, its folder including its login. |
 | `chatgpt-profile doctor [-Deep]` | Check that this PC and your ChatGPT version support side-by-side profiles. `-Deep` scans the app (a few seconds). |
 
-Every command takes `-Root <folder>` to keep profiles somewhere other than `%USERPROFILE%\ChatGPTProfiles`.
+Every command takes `-Root <folder>` to keep profiles somewhere other than `%USERPROFILE%\tandem-chatgpt-desktop`.
 Colors: Orange, Blue, Green, Purple, Red, Teal, Pink, Gray.
 
-The same commands are available as PowerShell functions (`New-ChatGPTProfile`, `Start-ChatGPTProfile`, `Get-ChatGPTProfile`, `Stop-ChatGPTProfile`, `Remove-ChatGPTProfile`, `Test-ChatGPTSideBySide`) after `Import-Module "$env:LOCALAPPDATA\Programs\ChatGPTSideBySide\ChatGPTSideBySide"`.
+The same commands are available as PowerShell functions (`New-ChatGPTProfile`, `Start-ChatGPTProfile`, `Get-ChatGPTProfile`, `Stop-ChatGPTProfile`, `Remove-ChatGPTProfile`, `Test-ChatGPTProfileSupport`) after `Import-Module "$env:LOCALAPPDATA\Programs\tandem-chatgpt-desktop\tandem-chatgpt-desktop"`.
 
 ## How it works
 
@@ -88,12 +88,14 @@ So after every launch, the tool waits up to 45 seconds for the app to write to t
 
 ## Files
 
-- Profiles: `%USERPROFILE%\ChatGPTProfiles\<name>\`
+- Profiles: `%USERPROFILE%\tandem-chatgpt-desktop\<name>\`
   - `codex-home\`: login (`auth.json`) and local state
   - `electron\`: window and browser data
   - `profile.json`, `icon.ico`, `launch.cmd`, `launcher.log`
-- Installed scripts: `%LOCALAPPDATA%\Programs\ChatGPTSideBySide\`
+- Installed scripts: `%LOCALAPPDATA%\Programs\tandem-chatgpt-desktop\`
 - Your main app's data (`%USERPROFILE%\.codex` and the app's own folders) is never touched.
+
+To move profiles, stop them, move the folder, and run `chatgpt-profile new <name> -Root <new folder>` for each one to refresh its shortcut. The app updates the paths it stores in the profile on its next launch.
 
 ## Security notes
 
@@ -104,16 +106,16 @@ So after every launch, the tool waits up to 45 seconds for the app to write to t
 ## Limitations
 
 - It relies on app behavior that isn't documented, so a ChatGPT update can break it. The safety check stops a broken launch from sharing your main login, and `doctor -Deep` tells you whether a new version is still supported.
-- The profile folder path must be ASCII-only and must not contain `%`, because `cmd.exe` can't pass those reliably. If your Windows user folder has other characters, use `-Root C:\ChatGPTProfiles`.
+- The profile folder path must be ASCII-only and must not contain `%`, because `cmd.exe` can't pass those reliably. If your Windows user folder has other characters, use `-Root C:\tandem-chatgpt-desktop`.
 - Windows only, and only the current ChatGPT app, not ChatGPT Classic.
 
 ## Uninstall
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\Programs\ChatGPTSideBySide\uninstall.ps1"
+powershell -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\Programs\tandem-chatgpt-desktop\uninstall.ps1"
 ```
 
-This removes the scripts and every profile's shortcuts, and keeps profile folders. Add `-RemoveProfiles` to also delete the profiles, including their logins.
+This removes the scripts and every profile's shortcuts, and keeps profile folders. Add `-RemoveProfiles` to also delete the profiles, including their logins, and `-Force` to skip the confirmation prompt.
 
 ## Prior art and credits
 

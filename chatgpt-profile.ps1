@@ -11,7 +11,7 @@
   chatgpt-profile remove <name> [-KeepData] [-Force]
   chatgpt-profile doctor [-Deep]
 
-  Every command accepts -Root <folder> (default: %USERPROFILE%\ChatGPTProfiles).
+  Every command accepts -Root <folder> (default: %USERPROFILE%\tandem-chatgpt-desktop).
   Colors: Orange, Blue, Green, Purple, Red, Teal, Pink, Gray.
 
 .EXAMPLE
@@ -44,7 +44,7 @@ function Show-Usage {
 }
 
 try {
-    Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath 'ChatGPTSideBySide\ChatGPTSideBySide.psd1') -Force
+    Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath 'tandem-chatgpt-desktop\tandem-chatgpt-desktop.psd1') -Force
     $common = @{}
     if ($Root) { $common.Root = $Root }
     if ($Command -in 'new', 'launch', 'stop', 'remove' -and -not $Name) {
@@ -70,14 +70,14 @@ try {
             if ($Force) { Remove-ChatGPTProfile -Name $Name -KeepData:$KeepData -Confirm:$false @common }
             else { Remove-ChatGPTProfile -Name $Name -KeepData:$KeepData @common }
         }
-        'doctor' { Test-ChatGPTSideBySide -Deep:$Deep @common | Format-Table -AutoSize -Wrap | Out-String | Write-Output }
+        'doctor' { Test-ChatGPTProfileSupport -Deep:$Deep @common | Format-Table -AutoSize -Wrap | Out-String | Write-Output }
         default { Show-Usage }
     }
 } catch {
     $message = $_.Exception.Message
     if ($Gui) {
         Add-Type -AssemblyName System.Windows.Forms
-        $title = 'ChatGPT side by side'
+        $title = 'tandem-chatgpt-desktop'
         if ($Name) { $title = "ChatGPT ($Name)" }
         $null = [System.Windows.Forms.MessageBox]::Show($message, $title, 'OK', 'Error')
     } else {

@@ -4,7 +4,7 @@
 # Store package: package lookups, process lookups and the in-package launch are mocked.
 
 BeforeAll {
-    Import-Module (Join-Path $PSScriptRoot '..\ChatGPTSideBySide\ChatGPTSideBySide.psd1') -Force
+    Import-Module (Join-Path $PSScriptRoot '..\tandem-chatgpt-desktop\tandem-chatgpt-desktop.psd1') -Force
     Add-Type -AssemblyName System.Drawing
 
     function New-TestPng([int]$Size) {
@@ -38,41 +38,41 @@ BeforeAll {
 
 Describe 'Profile names and roots' {
     It 'accepts the name <_>' -ForEach @('a', 'account2', 'Work_1', 'x-y', ('a' * 64)) {
-        InModuleScope ChatGPTSideBySide -Parameters @{ N = $_ } {
+        InModuleScope tandem-chatgpt-desktop -Parameters @{ N = $_ } {
             param($N)
             { Assert-ProfileName -Name $N } | Should -Not -Throw
         }
     }
 
     It 'rejects the name <_>' -ForEach @('', '-x', '_x', 'a b', '..', 'a\b', 'a/b', 'a.b', ('a' * 65)) {
-        InModuleScope ChatGPTSideBySide -Parameters @{ N = $_ } {
+        InModuleScope tandem-chatgpt-desktop -Parameters @{ N = $_ } {
             param($N)
             { Assert-ProfileName -Name $N } | Should -Throw '*Invalid profile name*'
         }
     }
 
     It 'rejects a root with non-ASCII characters' {
-        InModuleScope ChatGPTSideBySide {
-            { Resolve-ProfileRoot -Root ('C:\Users\Jos' + [char]0xE9 + '\ChatGPTProfiles') } | Should -Throw '*non-ASCII*'
+        InModuleScope tandem-chatgpt-desktop {
+            { Resolve-ProfileRoot -Root ('C:\Users\Jos' + [char]0xE9 + '\tandem-chatgpt-desktop') } | Should -Throw '*non-ASCII*'
         }
     }
 
     It 'rejects a root containing %' {
-        InModuleScope ChatGPTSideBySide { { Resolve-ProfileRoot -Root 'C:\100%\profiles' } | Should -Throw "*'%'*" }
+        InModuleScope tandem-chatgpt-desktop { { Resolve-ProfileRoot -Root 'C:\100%\profiles' } | Should -Throw "*'%'*" }
     }
 
     It 'rejects a drive root' {
-        InModuleScope ChatGPTSideBySide { { Resolve-ProfileRoot -Root 'C:\' } | Should -Throw '*drive root*' }
+        InModuleScope tandem-chatgpt-desktop { { Resolve-ProfileRoot -Root 'C:\' } | Should -Throw '*drive root*' }
     }
 
     It 'trims a trailing backslash' {
-        InModuleScope ChatGPTSideBySide { Resolve-ProfileRoot -Root 'C:\Profiles\' | Should -Be 'C:\Profiles' }
+        InModuleScope tandem-chatgpt-desktop { Resolve-ProfileRoot -Root 'C:\Profiles\' | Should -Be 'C:\Profiles' }
     }
 }
 
 Describe 'Get-ProfileLayout' {
     It 'keeps everything under <root>\<name>' {
-        InModuleScope ChatGPTSideBySide {
+        InModuleScope tandem-chatgpt-desktop {
             $layout = Get-ProfileLayout -Name 'work' -Root 'C:\P'
             $layout.Dir | Should -Be 'C:\P\work'
             $layout.CodexHome | Should -Be 'C:\P\work\codex-home'
@@ -85,7 +85,7 @@ Describe 'Get-ProfileLayout' {
 
 Describe 'Get-LaunchScriptLine' {
     It 'sets both variables and starts the app with the profile data folder' {
-        InModuleScope ChatGPTSideBySide {
+        InModuleScope tandem-chatgpt-desktop {
             $layout = Get-ProfileLayout -Name 'work' -Root 'C:\P'
             $lines = Get-LaunchScriptLine -Layout $layout -Exe 'C:\Program Files\WindowsApps\Pkg\app\ChatGPT.exe'
             $lines | Should -Be @(
@@ -105,7 +105,7 @@ Describe 'Process matching' {
             [pscustomobject]@{ ProcessId = 2; CommandLine = '"C:\App\ChatGPT.exe" --user-data-dir="C:\P\account22\electron"' }
             [pscustomobject]@{ ProcessId = 3; CommandLine = '"C:\App\ChatGPT.exe"' }
         )
-        InModuleScope ChatGPTSideBySide -Parameters @{ Procs = $procs } {
+        InModuleScope tandem-chatgpt-desktop -Parameters @{ Procs = $procs } {
             param($Procs)
             $layout = Get-ProfileLayout -Name 'account2' -Root 'C:\P'
             @(Get-ProfileProcess -Layout $layout -Process $Procs).ProcessId | Should -Be @(1)
@@ -114,7 +114,7 @@ Describe 'Process matching' {
 
     It 'ignores differences in letter case' {
         $procs = @([pscustomobject]@{ ProcessId = 9; CommandLine = '"ChatGPT.exe" --user-data-dir="c:\p\WORK\electron"' })
-        InModuleScope ChatGPTSideBySide -Parameters @{ Procs = $procs } {
+        InModuleScope tandem-chatgpt-desktop -Parameters @{ Procs = $procs } {
             param($Procs)
             $layout = Get-ProfileLayout -Name 'work' -Root 'C:\P'
             @(Get-ProfileProcess -Layout $layout -Process $Procs).Count | Should -Be 1
@@ -122,12 +122,12 @@ Describe 'Process matching' {
     }
 
     It 'skips Electron helper processes' {
-        Mock -ModuleName ChatGPTSideBySide Get-CimInstance {
+        Mock -ModuleName tandem-chatgpt-desktop Get-CimInstance {
             [pscustomobject]@{ ProcessId = 1; CommandLine = '"ChatGPT.exe" --user-data-dir="C:\P\w\electron"' }
             [pscustomobject]@{ ProcessId = 2; CommandLine = '"ChatGPT.exe" --type=renderer --user-data-dir="C:\P\w\electron"' }
             [pscustomobject]@{ ProcessId = 3; CommandLine = $null }
         }
-        InModuleScope ChatGPTSideBySide { @(Get-ChatGPTMainProcess).ProcessId | Should -Be @(1) }
+        InModuleScope tandem-chatgpt-desktop { @(Get-ChatGPTMainProcess).ProcessId | Should -Be @(1) }
     }
 }
 
@@ -135,9 +135,9 @@ Describe 'Start-ChatGPTProfile' {
     BeforeEach {
         $root = Join-Path $TestDrive 'profiles'
         $null = New-TestProfileFolder -Root $root -Name 'work'
-        Mock -ModuleName ChatGPTSideBySide Get-ChatGPTPackage { New-FakePackage }
-        Mock -ModuleName ChatGPTSideBySide Get-ProfileProcess { }
-        Mock -ModuleName ChatGPTSideBySide Close-ProfileProcess { 1 }
+        Mock -ModuleName tandem-chatgpt-desktop Get-ChatGPTPackage { New-FakePackage }
+        Mock -ModuleName tandem-chatgpt-desktop Get-ProfileProcess { }
+        Mock -ModuleName tandem-chatgpt-desktop Close-ProfileProcess { 1 }
     }
 
     It 'throws for a profile that does not exist' {
@@ -145,16 +145,16 @@ Describe 'Start-ChatGPTProfile' {
     }
 
     It 'launches inside the package and confirms the profile CODEX_HOME is used' {
-        Mock -ModuleName ChatGPTSideBySide Invoke-InPackage {
+        Mock -ModuleName tandem-chatgpt-desktop Invoke-InPackage {
             Set-Content -LiteralPath (Join-Path (Split-Path $ScriptPath) 'codex-home\state_5.sqlite') -Value 'x'
         }
         $result = Start-ChatGPTProfile -Name 'work' -Root $root -VerifySeconds 10
 
         $result.Status | Should -Be 'Started'
-        Should -Invoke -ModuleName ChatGPTSideBySide Invoke-InPackage -Times 1 -Exactly -ParameterFilter {
+        Should -Invoke -ModuleName tandem-chatgpt-desktop Invoke-InPackage -Times 1 -Exactly -ParameterFilter {
             $FamilyName -eq 'OpenAI.Codex_test' -and $ScriptPath -like '*\profiles\work\launch.cmd'
         }
-        Should -Invoke -ModuleName ChatGPTSideBySide Close-ProfileProcess -Times 0
+        Should -Invoke -ModuleName tandem-chatgpt-desktop Close-ProfileProcess -Times 0
         $cmd = Get-Content -LiteralPath (Join-Path $root 'work\launch.cmd')
         $cmd[1] | Should -Be ('set "CODEX_HOME=' + (Join-Path $root 'work\codex-home') + '"')
         $cmd[3] | Should -BeLike 'start "" "C:\Program Files\WindowsApps\OpenAI.Codex_test\app\ChatGPT.exe" --user-data-dir=*'
@@ -163,27 +163,27 @@ Describe 'Start-ChatGPTProfile' {
     }
 
     It 'closes the instance and throws when the profile CODEX_HOME stays untouched' {
-        Mock -ModuleName ChatGPTSideBySide Invoke-InPackage { }
+        Mock -ModuleName tandem-chatgpt-desktop Invoke-InPackage { }
         { Start-ChatGPTProfile -Name 'work' -Root $root -VerifySeconds 1 } | Should -Throw '*did not start using*'
-        Should -Invoke -ModuleName ChatGPTSideBySide Close-ProfileProcess -Times 1 -Exactly
+        Should -Invoke -ModuleName tandem-chatgpt-desktop Close-ProfileProcess -Times 1 -Exactly
         Get-Content -LiteralPath (Join-Path $root 'work\launcher.log') -Raw | Should -BeLike '*ERROR*'
     }
 
     It 'only brings the window forward when the profile is already running' {
-        Mock -ModuleName ChatGPTSideBySide Get-ProfileProcess { [pscustomobject]@{ ProcessId = 42; CommandLine = 'x' } }
-        Mock -ModuleName ChatGPTSideBySide Invoke-InPackage { }
-        Mock -ModuleName ChatGPTSideBySide Test-FreshWrite { $false }
+        Mock -ModuleName tandem-chatgpt-desktop Get-ProfileProcess { [pscustomobject]@{ ProcessId = 42; CommandLine = 'x' } }
+        Mock -ModuleName tandem-chatgpt-desktop Invoke-InPackage { }
+        Mock -ModuleName tandem-chatgpt-desktop Test-FreshWrite { $false }
 
         (Start-ChatGPTProfile -Name 'work' -Root $root).Status | Should -Be 'AlreadyRunning'
-        Should -Invoke -ModuleName ChatGPTSideBySide Invoke-InPackage -Times 1 -Exactly
-        Should -Invoke -ModuleName ChatGPTSideBySide Test-FreshWrite -Times 0
+        Should -Invoke -ModuleName tandem-chatgpt-desktop Invoke-InPackage -Times 1 -Exactly
+        Should -Invoke -ModuleName tandem-chatgpt-desktop Test-FreshWrite -Times 0
     }
 }
 
 Describe 'New-ChatGPTProfile' {
     BeforeAll {
         $png = New-TestPng 256
-        InModuleScope ChatGPTSideBySide -Parameters @{ Png = $png } {
+        InModuleScope tandem-chatgpt-desktop -Parameters @{ Png = $png } {
             param($Png)
             Write-IcoFile -Path (Join-Path (Get-PSDrive TestDrive).Root 'base.ico') -Frame @([pscustomobject]@{ Size = 256; Bytes = $Png })
         }
@@ -193,9 +193,9 @@ Describe 'New-ChatGPTProfile' {
         $root = Join-Path $TestDrive 'profiles'
         $shortcuts = Join-Path $TestDrive 'shortcuts'
         $null = New-Item -ItemType Directory -Force -Path $shortcuts
-        Mock -ModuleName ChatGPTSideBySide Get-ChatGPTPackage { New-FakePackage }
-        Mock -ModuleName ChatGPTSideBySide Get-ShortcutFolder { Join-Path (Get-PSDrive TestDrive).Root 'shortcuts' }
-        Mock -ModuleName ChatGPTSideBySide Get-ChatGPTMainProcess { }
+        Mock -ModuleName tandem-chatgpt-desktop Get-ChatGPTPackage { New-FakePackage }
+        Mock -ModuleName tandem-chatgpt-desktop Get-ShortcutFolder { Join-Path (Get-PSDrive TestDrive).Root 'shortcuts' }
+        Mock -ModuleName tandem-chatgpt-desktop Get-ChatGPTMainProcess { }
     }
 
     AfterEach {
@@ -249,7 +249,7 @@ Describe 'New-ChatGPTProfile' {
         @{ Label = 'work'; Badge = 'W' }
         @{ Label = '!!'; Badge = '?' }
     ) {
-        InModuleScope ChatGPTSideBySide -Parameters @{ L = $Label } { param($L) Get-DefaultBadge -Label $L } | Should -Be $Badge
+        InModuleScope tandem-chatgpt-desktop -Parameters @{ L = $Label } { param($L) Get-DefaultBadge -Label $L } | Should -Be $Badge
     }
 }
 
@@ -265,7 +265,7 @@ Describe 'Get-ChatGPTProfile' {
     }
 
     BeforeEach {
-        Mock -ModuleName ChatGPTSideBySide Get-ChatGPTMainProcess {
+        Mock -ModuleName tandem-chatgpt-desktop Get-ChatGPTMainProcess {
             $electron = Join-Path (Get-PSDrive TestDrive).Root 'profiles\work\electron'
             [pscustomobject]@{ ProcessId = 7; CommandLine = '"ChatGPT.exe" --user-data-dir="' + $electron + '"' }
         }
@@ -298,7 +298,7 @@ Describe 'Remove-ChatGPTProfile' {
         $lnk = Join-Path $TestDrive 'ChatGPT (Work).lnk'
         Set-Content -LiteralPath $lnk -Value 'x'
         @{ label = 'Work'; shortcuts = @($lnk) } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $dir 'profile.json')
-        Mock -ModuleName ChatGPTSideBySide Close-ProfileProcess { 0 }
+        Mock -ModuleName tandem-chatgpt-desktop Close-ProfileProcess { 0 }
     }
 
     AfterEach {
@@ -311,14 +311,14 @@ Describe 'Remove-ChatGPTProfile' {
         Remove-ChatGPTProfile -Name 'work' -Root $root -Confirm:$false
         $dir | Should -Not -Exist
         $lnk | Should -Not -Exist
-        Should -Invoke -ModuleName ChatGPTSideBySide Close-ProfileProcess -Times 1 -Exactly
+        Should -Invoke -ModuleName tandem-chatgpt-desktop Close-ProfileProcess -Times 1 -Exactly
     }
 
     It 'keeps the data with -KeepData' {
         Remove-ChatGPTProfile -Name 'work' -Root $root -KeepData -Confirm:$false
         $dir | Should -Exist
         $lnk | Should -Not -Exist
-        Should -Invoke -ModuleName ChatGPTSideBySide Close-ProfileProcess -Times 0
+        Should -Invoke -ModuleName tandem-chatgpt-desktop Close-ProfileProcess -Times 0
     }
 
     It 'does not follow links inside the profile folder' {
@@ -350,21 +350,21 @@ Describe 'Remove-ChatGPTProfile' {
 
 Describe 'Close-ProfileProcess' {
     It 'returns 0 when the profile is not running' {
-        Mock -ModuleName ChatGPTSideBySide Get-ProfileProcess { }
-        InModuleScope ChatGPTSideBySide {
+        Mock -ModuleName tandem-chatgpt-desktop Get-ProfileProcess { }
+        InModuleScope tandem-chatgpt-desktop {
             Close-ProfileProcess -Layout (Get-ProfileLayout -Name 'w' -Root 'C:\P') | Should -Be 0
         }
     }
 
     It 'ends the instance and its whole process tree' {
-        Mock -ModuleName ChatGPTSideBySide Get-ProfileProcess { [pscustomobject]@{ ProcessId = 101; CommandLine = 'x' } }
-        Mock -ModuleName ChatGPTSideBySide Get-ProcessTreeId { 103, 102, 101 }
-        Mock -ModuleName ChatGPTSideBySide Stop-Process { }
-        InModuleScope ChatGPTSideBySide {
+        Mock -ModuleName tandem-chatgpt-desktop Get-ProfileProcess { [pscustomobject]@{ ProcessId = 101; CommandLine = 'x' } }
+        Mock -ModuleName tandem-chatgpt-desktop Get-ProcessTreeId { 103, 102, 101 }
+        Mock -ModuleName tandem-chatgpt-desktop Stop-Process { }
+        InModuleScope tandem-chatgpt-desktop {
             Close-ProfileProcess -Layout (Get-ProfileLayout -Name 'w' -Root 'C:\P') | Should -Be 1
         }
-        Should -Invoke -ModuleName ChatGPTSideBySide Stop-Process -Times 3 -Exactly
-        Should -Invoke -ModuleName ChatGPTSideBySide Get-ProcessTreeId -Times 1 -Exactly -ParameterFilter { $RootId -contains 101 }
+        Should -Invoke -ModuleName tandem-chatgpt-desktop Stop-Process -Times 3 -Exactly
+        Should -Invoke -ModuleName tandem-chatgpt-desktop Get-ProcessTreeId -Times 1 -Exactly -ParameterFilter { $RootId -contains 101 }
     }
 }
 
@@ -372,7 +372,7 @@ Describe 'Icons' {
     It 'round-trips PNG frames and picks the largest one' {
         $small = New-TestPng 16
         $large = New-TestPng 256
-        InModuleScope ChatGPTSideBySide -Parameters @{ Small = $small; Large = $large } {
+        InModuleScope tandem-chatgpt-desktop -Parameters @{ Small = $small; Large = $large } {
             param($Small, $Large)
             $path = Join-Path (Get-PSDrive TestDrive).Root 'frames.ico'
             Write-IcoFile -Path $path -Frame @(
@@ -390,7 +390,7 @@ Describe 'Test-FileContainsText' {
     It 'finds text that spans read chunks' {
         $path = Join-Path $TestDrive 'bundle.bin'
         Set-Content -LiteralPath $path -NoNewline -Encoding Ascii -Value (('x' * 10) + 'CODEX_HOME' + ('y' * 7) + 'CODEX_ELECTRON_USER_DATA_PATH' + 'z')
-        InModuleScope ChatGPTSideBySide -Parameters @{ P = $path } {
+        InModuleScope tandem-chatgpt-desktop -Parameters @{ P = $path } {
             param($P)
             $found = Test-FileContainsText -Path $P -Text 'CODEX_HOME', 'CODEX_ELECTRON_USER_DATA_PATH' -ChunkSize 16
             $found['CODEX_HOME'] | Should -BeTrue
@@ -401,7 +401,7 @@ Describe 'Test-FileContainsText' {
     It 'reports text that is missing' {
         $path = Join-Path $TestDrive 'bundle2.bin'
         Set-Content -LiteralPath $path -NoNewline -Encoding Ascii -Value 'only CODEX_HOME here'
-        InModuleScope ChatGPTSideBySide -Parameters @{ P = $path } {
+        InModuleScope tandem-chatgpt-desktop -Parameters @{ P = $path } {
             param($P)
             $found = Test-FileContainsText -Path $P -Text 'CODEX_HOME', 'CODEX_ELECTRON_USER_DATA_PATH' -ChunkSize 16
             $found['CODEX_HOME'] | Should -BeTrue
@@ -410,27 +410,27 @@ Describe 'Test-FileContainsText' {
     }
 }
 
-Describe 'Test-ChatGPTSideBySide' {
+Describe 'Test-ChatGPTProfileSupport' {
     BeforeEach {
-        Mock -ModuleName ChatGPTSideBySide Get-ChatGPTPackage { New-FakePackage }
+        Mock -ModuleName tandem-chatgpt-desktop Get-ChatGPTPackage { New-FakePackage }
     }
 
     It 'confirms app support with -Deep when the bundle reads both variables' {
         Set-Content -LiteralPath (Join-Path $TestDrive 'app.asar') -Encoding Ascii -Value 'a CODEX_HOME b CODEX_ELECTRON_USER_DATA_PATH c'
-        $check = Test-ChatGPTSideBySide -Deep -Root (Join-Path $TestDrive 'profiles') | Where-Object Check -EQ 'App support'
+        $check = Test-ChatGPTProfileSupport -Deep -Root (Join-Path $TestDrive 'profiles') | Where-Object Check -EQ 'App support'
         $check.Status | Should -Be 'OK'
     }
 
     It 'fails app support when the bundle no longer mentions a variable' {
         Set-Content -LiteralPath (Join-Path $TestDrive 'app.asar') -Encoding Ascii -Value 'a CODEX_HOME b'
-        $check = Test-ChatGPTSideBySide -Deep -Root (Join-Path $TestDrive 'profiles') | Where-Object Check -EQ 'App support'
+        $check = Test-ChatGPTProfileSupport -Deep -Root (Join-Path $TestDrive 'profiles') | Where-Object Check -EQ 'App support'
         $check.Status | Should -Be 'FAIL'
         $check.Detail | Should -BeLike '*CODEX_ELECTRON_USER_DATA_PATH*'
     }
 
     It 'reports a missing app instead of throwing' {
-        Mock -ModuleName ChatGPTSideBySide Get-ChatGPTPackage { throw 'not installed' }
-        $results = Test-ChatGPTSideBySide -Root (Join-Path $TestDrive 'profiles')
+        Mock -ModuleName tandem-chatgpt-desktop Get-ChatGPTPackage { throw 'not installed' }
+        $results = Test-ChatGPTProfileSupport -Root (Join-Path $TestDrive 'profiles')
         ($results | Where-Object Check -EQ 'ChatGPT app').Status | Should -Be 'FAIL'
         ($results | Where-Object Check -EQ 'App support').Status | Should -Be 'SKIP'
     }

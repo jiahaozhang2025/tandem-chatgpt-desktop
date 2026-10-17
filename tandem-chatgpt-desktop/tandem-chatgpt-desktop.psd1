@@ -1,5 +1,5 @@
 @{
-    RootModule           = 'ChatGPTSideBySide.psm1'
+    RootModule           = 'tandem-chatgpt-desktop.psm1'
     ModuleVersion        = '0.1.0'
     GUID                 = '6f1d2b7e-3c4a-4e8b-9a51-2d7c8e0f4b13'
     Author               = 'Jiahao Zhang'
@@ -13,7 +13,7 @@
         'Stop-ChatGPTProfile'
         'Get-ChatGPTProfile'
         'Remove-ChatGPTProfile'
-        'Test-ChatGPTSideBySide'
+        'Test-ChatGPTProfileSupport'
     )
     CmdletsToExport      = @()
     VariablesToExport    = @()
@@ -21,8 +21,8 @@
     PrivateData          = @{
         PSData = @{
             Tags       = @('ChatGPT', 'Codex', 'Windows', 'MultiAccount', 'Profiles')
-            LicenseUri = 'https://github.com/jiahaozhang2025/chatgpt-side-by-side/blob/main/LICENSE'
-            ProjectUri = 'https://github.com/jiahaozhang2025/chatgpt-side-by-side'
+            LicenseUri = 'https://github.com/jiahaozhang2025/tandem-chatgpt-desktop/blob/main/LICENSE'
+            ProjectUri = 'https://github.com/jiahaozhang2025/tandem-chatgpt-desktop'
         }
     }
 }
