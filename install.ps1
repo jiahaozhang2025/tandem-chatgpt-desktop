@@ -37,6 +37,9 @@ if ($PSCmdlet.ShouldProcess($destinationPath, 'Install chatgpt-profile')) {
         '@echo off'
         'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0chatgpt-profile.ps1" %*'
     )
+    # Copies keep the "downloaded from the internet" mark of a downloaded zip, which makes
+    # Import-Module fail under a RemoteSigned execution policy.
+    Get-ChildItem -LiteralPath $destinationPath -Recurse -File | Unblock-File
 
     $cli = Join-Path -Path $destinationPath -ChildPath 'chatgpt-profile.cmd'
     Write-Output "Installed to $destinationPath"

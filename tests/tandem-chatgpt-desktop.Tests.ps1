@@ -435,3 +435,38 @@ Describe 'Test-ChatGPTProfileSupport' {
         ($results | Where-Object Check -EQ 'App support').Status | Should -Be 'SKIP'
     }
 }
+
+Describe 'install.ps1' {
+    BeforeAll {
+        # Simulate a downloaded release: copy what the installer needs and mark it as
+        # downloaded from the internet, as a browser plus Explorer extraction would.
+        $repo = Join-Path $PSScriptRoot '..'
+        $src = Join-Path $TestDrive 'download'
+        $null = New-Item -ItemType Directory -Force -Path (Join-Path $src 'tandem-chatgpt-desktop')
+        foreach ($file in 'install.ps1', 'chatgpt-profile.ps1', 'uninstall.ps1', 'README.md', 'LICENSE') {
+            Copy-Item -LiteralPath (Join-Path $repo $file) -Destination $src
+        }
+        Copy-Item -Path (Join-Path $repo 'tandem-chatgpt-desktop\*') -Destination (Join-Path $src 'tandem-chatgpt-desktop')
+        Get-ChildItem -LiteralPath $src -Recurse -File | ForEach-Object {
+            Set-Content -LiteralPath $_.FullName -Stream Zone.Identifier -Value "[ZoneTransfer]`r`nZoneId=3"
+        }
+        $dest = Join-Path $TestDrive 'installed'
+        $null = & (Join-Path $src 'install.ps1') -Destination $dest
+    }
+
+    It 'installs the scripts, module and cmd shim' {
+        foreach ($file in 'chatgpt-profile.ps1', 'chatgpt-profile.cmd', 'uninstall.ps1', 'README.md', 'LICENSE',
+            'tandem-chatgpt-desktop\tandem-chatgpt-desktop.psd1', 'tandem-chatgpt-desktop\tandem-chatgpt-desktop.psm1') {
+            Join-Path $dest $file | Should -Exist
+        }
+        Get-Content -LiteralPath (Join-Path $dest 'chatgpt-profile.cmd') |
+            Should -Contain 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0chatgpt-profile.ps1" %*'
+    }
+
+    It 'removes the downloaded-from-the-internet mark from installed files' {
+        Get-Item -LiteralPath (Join-Path $src 'install.ps1') -Stream Zone.Identifier | Should -Not -BeNullOrEmpty
+        $marked = @(Get-ChildItem -LiteralPath $dest -Recurse -File |
+                Where-Object { Get-Item -LiteralPath $_.FullName -Stream Zone.Identifier -ErrorAction SilentlyContinue })
+        $marked.FullName | Should -BeNullOrEmpty
+    }
+}

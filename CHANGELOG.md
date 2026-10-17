@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1 - 2026-10-17
+
+- Fixed: installing from a downloaded zip left Windows' "downloaded from the internet" mark on the installed files, so `Import-Module` failed under a RemoteSigned execution policy. The installer now unblocks the files it installs. Shortcuts and `chatgpt-profile.cmd` were not affected.
+
 ## 0.1.0 - 2026-10-17
 
 First release.
