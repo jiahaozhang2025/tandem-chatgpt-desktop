@@ -2,6 +2,8 @@
 
 Run two (or more) ChatGPT desktop accounts at the same time on Windows, each in its own window with its own login.
 
+**Looking for Claude?** Use the companion [tandem-claude-desktop](https://github.com/jiahaozhang2025/tandem-claude-desktop) launcher, which also includes sign-in routing and experimental Code-history handoff. Each project has its own installer and releases.
+
 It's one small PowerShell module. It doesn't modify the app, inject code into it, open a debugging port, proxy your requests, or leave anything running in the background.
 
 > **Unofficial.** Not affiliated with or endorsed by OpenAI. ChatGPT is a trademark of OpenAI.
