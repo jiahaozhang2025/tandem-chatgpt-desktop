@@ -35,13 +35,13 @@ This copies the scripts to `%LOCALAPPDATA%\Programs\tandem-chatgpt-desktop`. No 
 & "$env:LOCALAPPDATA\Programs\tandem-chatgpt-desktop\chatgpt-profile.cmd" new account2 -Label "Account 2"
 ```
 
-A **ChatGPT (Account 2)** shortcut with a colored badge appears on your desktop. Open it and sign in with your second account. Your usual ChatGPT icon keeps opening your main account, and both can stay open together.
+A **ChatGPT (Account 2)** entry appears in the Start menu and on your desktop, with the ChatGPT logo in the profile's color. Open it and sign in with your second account. Your usual ChatGPT icon keeps opening your main account, and both can stay open together.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `chatgpt-profile new <name> [-Label <text>] [-Color <color>] [-Badge <1-2 chars>] [-StartMenuShortcut] [-NoDesktopShortcut]` | Create a profile and its shortcut. Running it on an existing profile keeps its data and refreshes the icon and shortcut. |
+| `chatgpt-profile new <name> [-Label <text>] [-Color <color>] [-NoDesktopShortcut] [-NoStartMenuShortcut]` | Create a profile and its Start menu and desktop shortcuts. Running it on an existing profile keeps its data and refreshes the icon and shortcuts. |
 | `chatgpt-profile launch <name>` | Open the profile's window, or bring it to the front if it's already open. This is what the shortcut runs. |
 | `chatgpt-profile list` | Show profiles, whether each is running, and whether it has a saved login. |
 | `chatgpt-profile stop <name>` | End the profile's instance and everything it started, like End task in Task Manager. Closing a ChatGPT window only hides it to the system tray; use the tray icon's Quit to exit normally. |
@@ -82,7 +82,7 @@ So after every launch, the tool waits up to 45 seconds for the app to write to t
 - **Separate per profile:** the login, local Codex state, settings, MCP servers, skills and plugins, remote connections, and window and browser data.
 - **From your account:** chat history is stored by OpenAI per account, so it shows up after you sign in.
 - **Shared:** the app itself. There is one Store install, and it updates as usual.
-- **Look-alike windows:** both windows look the same and share one taskbar button. The shortcut's colored badge tells them apart.
+- **Look-alike windows:** both windows look the same and share one taskbar button. In Start and on the desktop, the profile's colored logo tells them apart. It is the same flat logo the app uses, so it stays clear on dark and light backgrounds.
 - **Links and notifications** that open ChatGPT (such as `codex://` links) go to your main window.
 - **Memory:** each window is a full instance of the app.
 
@@ -91,7 +91,7 @@ So after every launch, the tool waits up to 45 seconds for the app to write to t
 - Profiles: `%USERPROFILE%\tandem-chatgpt-desktop\<name>\`
   - `codex-home\`: login (`auth.json`) and local state
   - `electron\`: window and browser data
-  - `profile.json`, `icon.ico`, `launch.cmd`, `launcher.log`
+  - `profile.json`, `icon-<hash>.ico` (a new name whenever the icon changes, so Windows doesn't show a cached old one), `launch.cmd`, `launcher.log`
 - Installed scripts: `%LOCALAPPDATA%\Programs\tandem-chatgpt-desktop\`
 - Your main app's data (`%USERPROFILE%\.codex` and the app's own folders) is never touched.
 

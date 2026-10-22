@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.2 - 2026-10-21
+
+- Changed: profile icons are now the app's own flat ChatGPT logo in the profile's color, without a badge. The old icon was built from the app's shaded window icon, which looked faded on dark backgrounds such as the Start menu.
+- Changed: `new` also adds a Start menu entry. Use `-NoStartMenuShortcut` to skip it, or `-NoDesktopShortcut` to skip the desktop one.
+- Changed: icons get a new file name whenever they change, so Windows doesn't keep showing a cached old icon. Running `new` again re-points existing shortcuts to the new icon and deletes the old file.
+- Removed: `-Badge` and `-StartMenuShortcut`.
+
 ## 0.1.1 - 2026-10-17
 
 - Fixed: installing from a downloaded zip left Windows' "downloaded from the internet" mark on the installed files, so `Import-Module` failed under a RemoteSigned execution policy. The installer now unblocks the files it installs. Shortcuts and `chatgpt-profile.cmd` were not affected.

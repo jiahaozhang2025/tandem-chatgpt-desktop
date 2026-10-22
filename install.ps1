@@ -44,7 +44,7 @@ if ($PSCmdlet.ShouldProcess($destinationPath, 'Install chatgpt-profile')) {
     $cli = Join-Path -Path $destinationPath -ChildPath 'chatgpt-profile.cmd'
     Write-Output "Installed to $destinationPath"
     Write-Output ''
-    Write-Output 'Create a profile for your second account (adds a desktop shortcut):'
+    Write-Output 'Create a profile for your second account (adds Start menu and desktop shortcuts):'
     Write-Output "  `"$cli`" new account2 -Label `"Account 2`""
     Write-Output 'Then open the new shortcut and sign in. Check your setup any time with:'
     Write-Output "  `"$cli`" doctor -Deep"

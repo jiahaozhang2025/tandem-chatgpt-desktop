@@ -82,7 +82,6 @@ function Get-ProfileLayout {
         UserDataArg = '--user-data-dir="' + $userData + '"'
         Config      = Join-Path -Path $codexHome -ChildPath 'config.toml'
         Meta        = Join-Path -Path $dir -ChildPath 'profile.json'
-        Icon        = Join-Path -Path $dir -ChildPath 'icon.ico'
         LaunchCmd   = Join-Path -Path $dir -ChildPath 'launch.cmd'
         Log         = Join-Path -Path $dir -ChildPath 'launcher.log'
     }
@@ -101,6 +100,7 @@ function Get-ChatGPTPackage {
         FamilyName = $package.PackageFamilyName
         Exe        = Join-Path -Path $appDir -ChildPath 'ChatGPT.exe'
         BaseIcon   = Join-Path -Path $appDir -ChildPath 'resources\icon-chatgpt.ico'
+        Assets     = Join-Path -Path $package.InstallLocation -ChildPath 'assets'
         Bundle     = Join-Path -Path $appDir -ChildPath 'resources\app.asar'
     }
 }
@@ -243,14 +243,6 @@ function Save-ProfileMeta {
     $Meta | ConvertTo-Json | Set-Content -LiteralPath $Layout.Meta -Encoding UTF8
 }
 
-function Get-DefaultBadge {
-    param([Parameter(Mandatory)][string]$Label)
-    if ($Label -match '(\d{1,2})\s*$') { return $Matches[1] }
-    $letters = $Label -replace '[^A-Za-z0-9]', ''
-    if ($letters) { return $letters.Substring(0, 1).ToUpperInvariant() }
-    '?'
-}
-
 function Get-NextColor {
     param([Parameter(Mandatory)][string]$Root)
     $count = 0
@@ -272,7 +264,8 @@ function Save-ProfileShortcut {
     param(
         [Parameter(Mandatory)]$Layout,
         [Parameter(Mandatory)][string]$Label,
-        [Parameter(Mandatory)][string]$Folder
+        [Parameter(Mandatory)][string]$Folder,
+        [Parameter(Mandatory)][string]$Icon
     )
     $cli = Join-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -ChildPath 'chatgpt-profile.ps1'
     if (-not (Test-Path -LiteralPath $cli)) { throw "Launcher script not found: $cli" }
@@ -285,7 +278,7 @@ function Save-ProfileShortcut {
         $link.TargetPath = Join-Path -Path $env:SystemRoot -ChildPath 'System32\WindowsPowerShell\v1.0\powershell.exe'
         $link.Arguments = '-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}" launch {1} -Root "{2}" -Gui' -f $cli, $Layout.Name, $Layout.Root
         $link.WorkingDirectory = $Layout.Dir
-        $link.IconLocation = $Layout.Icon + ',0'
+        $link.IconLocation = $Icon + ',0'
         $link.WindowStyle = 7
         $link.Description = "ChatGPT, separate profile '$($Layout.Name)'"
         $link.Save()
@@ -293,6 +286,21 @@ function Save-ProfileShortcut {
         $null = [Runtime.InteropServices.Marshal]::ReleaseComObject($shell)
     }
     $path
+}
+
+function Write-ShortcutIcon {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Icon
+    )
+    $shell = New-Object -ComObject WScript.Shell
+    try {
+        $link = $shell.CreateShortcut($Path)
+        $link.IconLocation = $Icon + ',0'
+        $link.Save()
+    } finally {
+        $null = [Runtime.InteropServices.Marshal]::ReleaseComObject($shell)
+    }
 }
 
 #endregion
@@ -337,60 +345,73 @@ function Get-BaseBitmap {
     try { $icon.ToBitmap() } finally { $icon.Dispose() }
 }
 
-function ConvertTo-BadgedPng {
+# The flat logo the app itself shows in Start on dark backgrounds, at the requested
+# size when the Store package ships one (small sizes are drawn by hand for clarity).
+function Get-LogoBitmap {
+    param(
+        [Parameter(Mandatory)]$App,
+        [Parameter(Mandatory)][int]$Size
+    )
+    $candidates = @(Get-ChildItem -LiteralPath $App.Assets -Filter 'Square44x44Logo.targetsize-*' -File -ErrorAction SilentlyContinue |
+            ForEach-Object {
+                if ($_.Name -match '^Square44x44Logo\.targetsize-(\d+)_altform-unplated\.png$') {
+                    [pscustomobject]@{ Path = $_.FullName; Size = [int]$Matches[1] }
+                }
+            })
+    $pick = $candidates | Where-Object { $_.Size -eq $Size } | Select-Object -First 1
+    if ($null -eq $pick) { $pick = $candidates | Sort-Object -Property Size -Descending | Select-Object -First 1 }
+    if ($null -eq $pick) {
+        # Older app versions: use the window icon; tinting still turns it into a flat silhouette.
+        return Get-BaseBitmap -Path $App.BaseIcon
+    }
+    # Read the bytes first so the file is not kept locked.
+    $stream = New-Object -TypeName IO.MemoryStream -ArgumentList (, [IO.File]::ReadAllBytes($pick.Path))
+    $image = [System.Drawing.Image]::FromStream($stream)
+    try { New-Object -TypeName System.Drawing.Bitmap -ArgumentList $image }
+    finally { $image.Dispose(); $stream.Dispose() }
+}
+
+# Draws the logo at the given size with every pixel in the profile color, keeping its transparency.
+function ConvertTo-TintedPng {
     param(
         [Parameter(Mandatory)][System.Drawing.Image]$Base,
         [Parameter(Mandatory)][int]$Size,
-        [Parameter(Mandatory)][string]$ColorHex,
-        [Parameter(Mandatory)][string]$Badge
+        [Parameter(Mandatory)][string]$ColorHex
     )
+    $color = [System.Drawing.ColorTranslator]::FromHtml($ColorHex)
+    $matrix = New-Object -TypeName System.Drawing.Imaging.ColorMatrix
+    $matrix.Matrix00 = 0
+    $matrix.Matrix11 = 0
+    $matrix.Matrix22 = 0
+    $matrix.Matrix40 = $color.R / 255
+    $matrix.Matrix41 = $color.G / 255
+    $matrix.Matrix42 = $color.B / 255
+    $attributes = New-Object -TypeName System.Drawing.Imaging.ImageAttributes
+    $attributes.SetColorMatrix($matrix)
+    # Without this, scaling blends the transparent area outside the image into the edges.
+    $attributes.SetWrapMode([System.Drawing.Drawing2D.WrapMode]::TileFlipXY)
     $bitmap = New-Object -TypeName System.Drawing.Bitmap -ArgumentList $Size, $Size, ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
     $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-    $disposables = @()
     try {
-        $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
         $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
         $graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
-        $graphics.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAlias
-        $graphics.DrawImage($Base, 0, 0, $Size, $Size)
-
-        # Colored badge in the bottom-right corner with a white ring and label.
-        $diameter = [float][Math]::Round($Size * 0.58)
-        $corner = [float]($Size - $diameter)
-        $rect = New-Object -TypeName System.Drawing.RectangleF -ArgumentList $corner, $corner, ($diameter - 1), ($diameter - 1)
-        $fill = New-Object -TypeName System.Drawing.SolidBrush -ArgumentList ([System.Drawing.ColorTranslator]::FromHtml($ColorHex))
-        $ring = New-Object -TypeName System.Drawing.Pen -ArgumentList ([System.Drawing.Color]::White), ([float][Math]::Max(1, $Size / 32))
-        $ink = New-Object -TypeName System.Drawing.SolidBrush -ArgumentList ([System.Drawing.Color]::White)
-        $fontScale = 0.62
-        if ($Badge.Length -gt 1) { $fontScale = 0.46 }
-        $font = New-Object -TypeName System.Drawing.Font -ArgumentList 'Segoe UI', ([float]($diameter * $fontScale)), ([System.Drawing.FontStyle]::Bold), ([System.Drawing.GraphicsUnit]::Pixel)
-        $format = New-Object -TypeName System.Drawing.StringFormat
-        $format.Alignment = [System.Drawing.StringAlignment]::Center
-        $format.LineAlignment = [System.Drawing.StringAlignment]::Center
-        $disposables = @($fill, $ring, $ink, $font, $format)
-
-        $graphics.FillEllipse($fill, $rect)
-        $graphics.DrawEllipse($ring, $rect)
-        $graphics.DrawString($Badge, $font, $ink, $rect, $format)
-
+        $target = New-Object -TypeName System.Drawing.Rectangle -ArgumentList 0, 0, $Size, $Size
+        $graphics.DrawImage($Base, $target, 0, 0, $Base.Width, $Base.Height, [System.Drawing.GraphicsUnit]::Pixel, $attributes)
         $stream = New-Object -TypeName IO.MemoryStream
         try {
             $bitmap.Save($stream, [System.Drawing.Imaging.ImageFormat]::Png)
             , $stream.ToArray()
         } finally { $stream.Dispose() }
     } finally {
-        foreach ($d in $disposables) { $d.Dispose() }
         $graphics.Dispose()
         $bitmap.Dispose()
+        $attributes.Dispose()
     }
 }
 
-# Writes an .ico whose frames are PNG images (supported since Windows Vista).
-function Write-IcoFile {
-    param(
-        [Parameter(Mandatory)][string]$Path,
-        [Parameter(Mandatory)][object[]]$Frame
-    )
+# The bytes of an .ico whose frames are PNG images (supported since Windows Vista).
+function ConvertTo-IcoByte {
+    param([Parameter(Mandatory)][object[]]$Frame)
     $stream = New-Object -TypeName IO.MemoryStream
     $writer = New-Object -TypeName IO.BinaryWriter -ArgumentList $stream
     try {
@@ -413,29 +434,33 @@ function Write-IcoFile {
         }
         foreach ($f in $Frame) { $writer.Write([byte[]]$f.Bytes) }
         $writer.Flush()
-        [IO.File]::WriteAllBytes($Path, $stream.ToArray())
+        , $stream.ToArray()
     } finally {
         $writer.Dispose()
         $stream.Dispose()
     }
 }
 
+# Writes the profile's icon and returns its path. The file name comes from the icon's
+# contents, so a changed icon gets a new name: Windows caches shortcut icons by path.
 function Save-ProfileIcon {
     param(
-        [Parameter(Mandatory)][string]$BaseIcon,
-        [Parameter(Mandatory)][string]$Path,
-        [Parameter(Mandatory)][string]$ColorHex,
-        [Parameter(Mandatory)][string]$Badge
+        [Parameter(Mandatory)]$App,
+        [Parameter(Mandatory)]$Layout,
+        [Parameter(Mandatory)][string]$ColorHex
     )
-    $base = Get-BaseBitmap -Path $BaseIcon
-    try {
-        $frames = foreach ($size in 256, 48, 32, 16) {
-            [pscustomobject]@{ Size = $size; Bytes = (ConvertTo-BadgedPng -Base $base -Size $size -ColorHex $ColorHex -Badge $Badge) }
-        }
-        Write-IcoFile -Path $Path -Frame @($frames)
-    } finally {
-        $base.Dispose()
+    $frames = foreach ($size in 256, 48, 32, 24, 16) {
+        $base = Get-LogoBitmap -App $App -Size $size
+        try { [pscustomobject]@{ Size = $size; Bytes = (ConvertTo-TintedPng -Base $base -Size $size -ColorHex $ColorHex) } }
+        finally { $base.Dispose() }
     }
+    $bytes = ConvertTo-IcoByte -Frame @($frames)
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { $hash = -join @($sha.ComputeHash($bytes)[0..3] | ForEach-Object { $_.ToString('x2') }) }
+    finally { $sha.Dispose() }
+    $path = Join-Path -Path $Layout.Dir -ChildPath "icon-$hash.ico"
+    if (-not (Test-Path -LiteralPath $path)) { [IO.File]::WriteAllBytes($path, $bytes) }
+    $path
 }
 
 #endregion
@@ -487,11 +512,12 @@ function Get-CheckResult {
 function New-ChatGPTProfile {
     <#
     .SYNOPSIS
-    Creates (or updates) a separate ChatGPT profile and its shortcut.
+    Creates (or updates) a separate ChatGPT profile and its shortcuts.
     .DESCRIPTION
     Creates <Root>\<Name> with its own login folder (CODEX_HOME) and window data
-    folder, a badged icon, and a "ChatGPT (<Label>)" shortcut on the desktop. Running
-    it again on an existing profile keeps its data and refreshes the icon and shortcut.
+    folder, an icon showing the ChatGPT logo in the profile's color, and a
+    "ChatGPT (<Label>)" shortcut on the desktop and in the Start menu. Running it again
+    on an existing profile keeps its data and refreshes the icon and shortcuts.
     .EXAMPLE
     New-ChatGPTProfile -Name work -Label Work -Color Blue
     #>
@@ -500,32 +526,39 @@ function New-ChatGPTProfile {
         [Parameter(Mandatory, Position = 0)][string]$Name,
         [string]$Label,
         [ValidateSet('Orange', 'Blue', 'Green', 'Purple', 'Red', 'Teal', 'Pink', 'Gray')][string]$Color,
-        [ValidatePattern('^[A-Za-z0-9]{1,2}$')][string]$Badge,
         [string]$Root = (Get-DefaultProfileRoot),
         [switch]$NoDesktopShortcut,
-        [switch]$StartMenuShortcut
+        [switch]$NoStartMenuShortcut
     )
     $layout = Get-ProfileLayout -Name $Name -Root $Root
     $app = Get-ChatGPTPackage
     $meta = Read-ProfileMeta -Layout $layout
     if (-not $Label) { $Label = Get-MetaValue -Meta $meta -Key 'label' -Default $Name }
     if (-not $Color) { $Color = Get-MetaValue -Meta $meta -Key 'color' -Default (Get-NextColor -Root $layout.Root) }
-    if (-not $Badge) { $Badge = Get-MetaValue -Meta $meta -Key 'badge' -Default (Get-DefaultBadge -Label $Label) }
     if (-not $script:Palette.Contains($Color)) { $Color = 'Orange' }
 
     if (-not $PSCmdlet.ShouldProcess($layout.Dir, 'Create or update ChatGPT profile')) { return }
 
     Initialize-ProfileFolder -Layout $layout
-    Save-ProfileIcon -BaseIcon $app.BaseIcon -Path $layout.Icon -ColorHex $script:Palette[$Color] -Badge $Badge
-    $folders = @(Get-ShortcutFolder -Desktop:(-not $NoDesktopShortcut) -StartMenu:$StartMenuShortcut)
-    $created = @(foreach ($folder in $folders) { Save-ProfileShortcut -Layout $layout -Label $Label -Folder $folder })
+    $icon = Save-ProfileIcon -App $app -Layout $layout -ColorHex $script:Palette[$Color]
+    $folders = @(Get-ShortcutFolder -Desktop:(-not $NoDesktopShortcut) -StartMenu:(-not $NoStartMenuShortcut))
+    $created = @(foreach ($folder in $folders) { Save-ProfileShortcut -Layout $layout -Label $Label -Folder $folder -Icon $icon })
+    # Shortcuts made earlier (under another label, or in a folder skipped this time) get the new icon too.
+    $known = @(Get-MetaValue -Meta $meta -Key 'shortcuts' -Default @())
+    foreach ($link in $known) {
+        if ($created -notcontains $link -and $link -like '*.lnk' -and (Test-Path -LiteralPath $link)) {
+            Write-ShortcutIcon -Path $link -Icon $icon
+        }
+    }
+    Get-ChildItem -LiteralPath $layout.Dir -Filter 'icon*.ico' -File |
+        Where-Object { $_.Name -match '^icon(-[0-9a-f]+)?\.ico$' -and $_.FullName -ne $icon } |
+        Remove-Item -Force
     # Remember every shortcut ever made for this profile so Remove can clean them all up.
-    $shortcuts = @(@(Get-MetaValue -Meta $meta -Key 'shortcuts' -Default @()) + $created | Sort-Object -Unique)
+    $shortcuts = @($known + $created | Sort-Object -Unique)
     Save-ProfileMeta -Layout $layout -Meta ([ordered]@{
             name      = $Name
             label     = $Label
             color     = $Color
-            badge     = $Badge
             created   = Get-MetaValue -Meta $meta -Key 'created' -Default ((Get-Date).ToString('o'))
             shortcuts = $shortcuts
         })

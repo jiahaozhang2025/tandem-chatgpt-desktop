@@ -18,6 +18,46 @@ BeforeAll {
         , $stream.ToArray()
     }
 
+    # A white circle or square on a transparent background, like the app's flat logos.
+    function New-TestLogo([int]$Size, [string]$Shape) {
+        $bitmap = New-Object System.Drawing.Bitmap $Size, $Size, ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+        $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+        $graphics.Clear([System.Drawing.Color]::Transparent)
+        if ($Shape -eq 'circle') {
+            $graphics.FillEllipse([System.Drawing.Brushes]::White, [int]($Size / 8), [int]($Size / 8), [int]($Size * 3 / 4), [int]($Size * 3 / 4))
+        } else {
+            $graphics.FillRectangle([System.Drawing.Brushes]::White, 0, 0, $Size, $Size)
+        }
+        $graphics.Dispose()
+        $stream = New-Object IO.MemoryStream
+        $bitmap.Save($stream, [System.Drawing.Imaging.ImageFormat]::Png)
+        $bitmap.Dispose()
+        , $stream.ToArray()
+    }
+
+    # The frames of an .ico file, as size -> PNG bytes.
+    function Get-IcoFrame([string]$Path) {
+        $bytes = [IO.File]::ReadAllBytes($Path)
+        $frames = @{}
+        for ($i = 0; $i -lt [BitConverter]::ToUInt16($bytes, 4); $i++) {
+            $entry = 6 + 16 * $i
+            $size = [int]$bytes[$entry]
+            if ($size -eq 0) { $size = 256 }
+            $length = [int][BitConverter]::ToUInt32($bytes, $entry + 8)
+            $offset = [int][BitConverter]::ToUInt32($bytes, $entry + 12)
+            $png = New-Object byte[] $length
+            [Array]::Copy($bytes, $offset, $png, 0, $length)
+            $frames[$size] = $png
+        }
+        $frames
+    }
+
+    function Get-PngPixel([byte[]]$Png, [int]$X, [int]$Y) {
+        $stream = New-Object IO.MemoryStream (, $Png)
+        $bitmap = New-Object System.Drawing.Bitmap $stream
+        try { $bitmap.GetPixel($X, $Y) } finally { $bitmap.Dispose(); $stream.Dispose() }
+    }
+
     function New-FakePackage {
         $drive = (Get-PSDrive TestDrive).Root
         [pscustomobject]@{
@@ -25,6 +65,7 @@ BeforeAll {
             FamilyName = 'OpenAI.Codex_test'
             Exe        = 'C:\Program Files\WindowsApps\OpenAI.Codex_test\app\ChatGPT.exe'
             BaseIcon   = Join-Path $drive 'base.ico'
+            Assets     = Join-Path $drive 'assets'
             Bundle     = Join-Path $drive 'app.asar'
         }
     }
@@ -182,27 +223,41 @@ Describe 'Start-ChatGPTProfile' {
 
 Describe 'New-ChatGPTProfile' {
     BeforeAll {
+        $drive = (Get-PSDrive TestDrive).Root
+        # The window icon, used only when the app ships no flat logo: a fully opaque square.
         $png = New-TestPng 256
-        InModuleScope tandem-chatgpt-desktop -Parameters @{ Png = $png } {
-            param($Png)
-            Write-IcoFile -Path (Join-Path (Get-PSDrive TestDrive).Root 'base.ico') -Frame @([pscustomobject]@{ Size = 256; Bytes = $Png })
+        InModuleScope tandem-chatgpt-desktop -Parameters @{ Png = $png; Path = (Join-Path $drive 'base.ico') } {
+            param($Png, $Path)
+            [IO.File]::WriteAllBytes($Path, (ConvertTo-IcoByte -Frame @([pscustomobject]@{ Size = 256; Bytes = $Png })))
         }
+        # The app's flat logos: a circle at 256 px and a square at 16 px, so a frame shows
+        # which file it came from, plus a light-theme variant that must be ignored.
+        $assets = Join-Path $drive 'assets'
+        $null = New-Item -ItemType Directory -Force -Path $assets
+        [IO.File]::WriteAllBytes((Join-Path $assets 'Square44x44Logo.targetsize-256_altform-unplated.png'), (New-TestLogo 256 'circle'))
+        [IO.File]::WriteAllBytes((Join-Path $assets 'Square44x44Logo.targetsize-16_altform-unplated.png'), (New-TestLogo 16 'square'))
+        [IO.File]::WriteAllBytes((Join-Path $assets 'Square44x44Logo.targetsize-256_altform-lightunplated.png'), (New-TestLogo 256 'square'))
     }
 
     BeforeEach {
         $root = Join-Path $TestDrive 'profiles'
-        $shortcuts = Join-Path $TestDrive 'shortcuts'
-        $null = New-Item -ItemType Directory -Force -Path $shortcuts
+        $desktop = Join-Path $TestDrive 'desktop'
+        $startMenu = Join-Path $TestDrive 'startmenu'
+        $null = New-Item -ItemType Directory -Force -Path $desktop, $startMenu
         Mock -ModuleName tandem-chatgpt-desktop Get-ChatGPTPackage { New-FakePackage }
-        Mock -ModuleName tandem-chatgpt-desktop Get-ShortcutFolder { Join-Path (Get-PSDrive TestDrive).Root 'shortcuts' }
+        Mock -ModuleName tandem-chatgpt-desktop Get-ShortcutFolder {
+            $drive = (Get-PSDrive TestDrive).Root
+            if ($Desktop) { Join-Path $drive 'desktop' }
+            if ($StartMenu) { Join-Path $drive 'startmenu' }
+        }
         Mock -ModuleName tandem-chatgpt-desktop Get-ChatGPTMainProcess { }
     }
 
     AfterEach {
-        Remove-Item -LiteralPath $root, $shortcuts -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $root, $desktop, $startMenu -Recurse -Force -ErrorAction SilentlyContinue
     }
 
-    It 'creates the folders, login config, metadata, icon and shortcut' {
+    It 'creates the folders, login config, metadata, icon and both shortcuts' {
         $result = New-ChatGPTProfile -Name 'work' -Label 'Work' -Color 'Blue' -Root $root -Confirm:$false
 
         $result.Name | Should -Be 'work'
@@ -214,19 +269,42 @@ Describe 'New-ChatGPTProfile' {
         $meta = Get-Content -LiteralPath (Join-Path $root 'work\profile.json') -Raw | ConvertFrom-Json
         $meta.label | Should -Be 'Work'
         $meta.color | Should -Be 'Blue'
-        $meta.badge | Should -Be 'W'
+        $meta.PSObject.Properties.Name | Should -Not -Contain 'badge'
 
-        $icon = [IO.File]::ReadAllBytes((Join-Path $root 'work\icon.ico'))
-        $icon[0..3] | Should -Be @(0, 0, 1, 0)
-        [BitConverter]::ToUInt16($icon, 4) | Should -Be 4
+        $icons = @(Get-ChildItem -LiteralPath (Join-Path $root 'work') -Filter 'icon*.ico')
+        $icons.Count | Should -Be 1
+        $icons[0].Name | Should -Match '^icon-[0-9a-f]{8}\.ico$'
+        $bytes = [IO.File]::ReadAllBytes($icons[0].FullName)
+        $bytes[0..3] | Should -Be @(0, 0, 1, 0)
+        [BitConverter]::ToUInt16($bytes, 4) | Should -Be 5
 
-        $lnkPath = Join-Path $shortcuts 'ChatGPT (Work).lnk'
-        $lnkPath | Should -Exist
-        @($meta.shortcuts) | Should -Be @($lnkPath)
-        $link = (New-Object -ComObject WScript.Shell).CreateShortcut($lnkPath)
-        $link.TargetPath | Should -BeLike '*\WindowsPowerShell\v1.0\powershell.exe'
-        $link.Arguments | Should -BeLike ('*chatgpt-profile.ps1" launch work -Root "' + $root + '" -Gui')
-        $link.IconLocation | Should -BeLike '*\work\icon.ico,0'
+        foreach ($folder in $desktop, $startMenu) {
+            $lnkPath = Join-Path $folder 'ChatGPT (Work).lnk'
+            $lnkPath | Should -Exist
+            $link = (New-Object -ComObject WScript.Shell).CreateShortcut($lnkPath)
+            $link.TargetPath | Should -BeLike '*\WindowsPowerShell\v1.0\powershell.exe'
+            $link.Arguments | Should -BeLike ('*chatgpt-profile.ps1" launch work -Root "' + $root + '" -Gui')
+            $link.IconLocation | Should -BeLike ('*\work\' + $icons[0].Name + ',0')
+        }
+        @($meta.shortcuts).Count | Should -Be 2
+    }
+
+    It 'colors the flat logo, keeps its transparency and prefers the exact-size logo' {
+        $null = New-ChatGPTProfile -Name 'work' -Color 'Blue' -Root $root -NoDesktopShortcut -NoStartMenuShortcut -Confirm:$false
+        $frames = Get-IcoFrame (Get-ChildItem -LiteralPath (Join-Path $root 'work') -Filter 'icon-*.ico').FullName
+
+        @($frames.Keys | Sort-Object) | Should -Be @(16, 24, 32, 48, 256)
+        # Palette Blue is #1C7ED6.
+        $center = Get-PngPixel $frames[256] 128 128
+        $center.A | Should -Be 255
+        [Math]::Abs($center.R - 0x1C) | Should -BeLessOrEqual 1
+        [Math]::Abs($center.G - 0x7E) | Should -BeLessOrEqual 1
+        [Math]::Abs($center.B - 0xD6) | Should -BeLessOrEqual 1
+        # The circle's corners stay transparent, so the light-theme square was not used.
+        (Get-PngPixel $frames[256] 2 2).A | Should -Be 0
+        # 16 px comes from the 16 px square; 32 px has no own logo and is scaled from the circle.
+        (Get-PngPixel $frames[16] 1 1).A | Should -BeGreaterThan 240
+        (Get-PngPixel $frames[32] 1 1).A | Should -Be 0
     }
 
     It 'keeps existing data and settings when run again' {
@@ -241,15 +319,40 @@ Describe 'New-ChatGPTProfile' {
         $meta.label | Should -Be 'Work'
         $meta.color | Should -Be 'Green'
         $meta.created | Should -Be $created
+        @(Get-ChildItem -LiteralPath (Join-Path $root 'work') -Filter 'icon*.ico').Count | Should -Be 1
     }
 
-    It 'derives the badge <Badge> from the label <Label>' -ForEach @(
-        @{ Label = 'Account 2'; Badge = '2' }
-        @{ Label = 'Team 12'; Badge = '12' }
-        @{ Label = 'work'; Badge = 'W' }
-        @{ Label = '!!'; Badge = '?' }
-    ) {
-        InModuleScope tandem-chatgpt-desktop -Parameters @{ L = $Label } { param($L) Get-DefaultBadge -Label $L } | Should -Be $Badge
+    It 'gives a changed icon a new file name and points older shortcuts at it' {
+        $null = New-ChatGPTProfile -Name 'work' -Label 'Work' -Color 'Green' -Root $root -Confirm:$false
+        $old = (Get-ChildItem -LiteralPath (Join-Path $root 'work') -Filter 'icon-*.ico').Name
+        Set-Content -LiteralPath (Join-Path $root 'work\icon.ico') -Value 'icon file from 0.1.x'
+
+        $null = New-ChatGPTProfile -Name 'work' -Color 'Red' -Root $root -NoStartMenuShortcut -Confirm:$false
+
+        $icons = @(Get-ChildItem -LiteralPath (Join-Path $root 'work') -Filter 'icon*.ico')
+        $icons.Count | Should -Be 1
+        $icons[0].Name | Should -Not -Be $old
+        # The Start menu shortcut was not recreated this time, but it uses the new icon too.
+        $link = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $startMenu 'ChatGPT (Work).lnk'))
+        $link.IconLocation | Should -BeLike ('*\' + $icons[0].Name + ',0')
+    }
+
+    It 'skips both shortcuts on request' {
+        $null = New-ChatGPTProfile -Name 'work' -Root $root -NoDesktopShortcut -NoStartMenuShortcut -Confirm:$false
+        @(Get-ChildItem -LiteralPath $desktop, $startMenu -Filter '*.lnk').Count | Should -Be 0
+    }
+
+    It 'falls back to the window icon when the app ships no flat logo' {
+        Mock -ModuleName tandem-chatgpt-desktop Get-ChatGPTPackage {
+            $package = New-FakePackage
+            $package.Assets = Join-Path (Get-PSDrive TestDrive).Root 'no-assets'
+            $package
+        }
+        $null = New-ChatGPTProfile -Name 'work' -Color 'Blue' -Root $root -NoDesktopShortcut -NoStartMenuShortcut -Confirm:$false
+        $frames = Get-IcoFrame (Get-ChildItem -LiteralPath (Join-Path $root 'work') -Filter 'icon-*.ico').FullName
+        $pixel = Get-PngPixel $frames[256] 128 128
+        $pixel.A | Should -Be 255
+        [Math]::Abs($pixel.B - 0xD6) | Should -BeLessOrEqual 1
     }
 }
 
@@ -375,10 +478,10 @@ Describe 'Icons' {
         InModuleScope tandem-chatgpt-desktop -Parameters @{ Small = $small; Large = $large } {
             param($Small, $Large)
             $path = Join-Path (Get-PSDrive TestDrive).Root 'frames.ico'
-            Write-IcoFile -Path $path -Frame @(
-                [pscustomobject]@{ Size = 16; Bytes = $Small }
-                [pscustomobject]@{ Size = 256; Bytes = $Large }
-            )
+            [IO.File]::WriteAllBytes($path, (ConvertTo-IcoByte -Frame @(
+                        [pscustomobject]@{ Size = 16; Bytes = $Small }
+                        [pscustomobject]@{ Size = 256; Bytes = $Large }
+                    )))
             $frame = Get-IcoPngFrame -Path $path
             $frame.Length | Should -Be $Large.Length
             [Convert]::ToBase64String($frame) | Should -Be ([Convert]::ToBase64String($Large))

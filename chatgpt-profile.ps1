@@ -3,8 +3,8 @@
   chatgpt-profile: run several ChatGPT desktop accounts side by side on Windows.
 
 .DESCRIPTION
-  chatgpt-profile new <name> [-Label <text>] [-Color <color>] [-Badge <1-2 chars>]
-                             [-StartMenuShortcut] [-NoDesktopShortcut]
+  chatgpt-profile new <name> [-Label <text>] [-Color <color>]
+                             [-NoDesktopShortcut] [-NoStartMenuShortcut]
   chatgpt-profile launch <name>
   chatgpt-profile list
   chatgpt-profile stop <name>
@@ -26,10 +26,9 @@ param(
     [Parameter(Position = 1)][string]$Name,
     [string]$Label,
     [string]$Color,
-    [string]$Badge,
     [string]$Root,
     [switch]$NoDesktopShortcut,
-    [switch]$StartMenuShortcut,
+    [switch]$NoStartMenuShortcut,
     [switch]$KeepData,
     [switch]$Force,
     [switch]$Deep,
@@ -56,8 +55,7 @@ try {
             $options = @{ Name = $Name }
             if ($Label) { $options.Label = $Label }
             if ($Color) { $options.Color = $Color }
-            if ($Badge) { $options.Badge = $Badge }
-            $result = New-ChatGPTProfile @options @common -NoDesktopShortcut:$NoDesktopShortcut -StartMenuShortcut:$StartMenuShortcut
+            $result = New-ChatGPTProfile @options @common -NoDesktopShortcut:$NoDesktopShortcut -NoStartMenuShortcut:$NoStartMenuShortcut
             $result | Format-List | Out-String | Write-Output
             if (-not $result.SignedIn) {
                 Write-Output "Next: open the 'ChatGPT ($($result.Label))' shortcut (or run 'chatgpt-profile launch $Name') and sign in."
