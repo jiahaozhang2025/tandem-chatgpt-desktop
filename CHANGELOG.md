@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0 — 2026-10-26
+
+* Add persistent grouped/separate taskbar options through `chatgpt-profile taskbar grouped` and `chatgpt-profile taskbar separate`.
+* Give separate account windows and shortcuts matching taskbar identities and colored icons, including a primary-account shortcut.
+* Use a hidden helper to maintain separate identities on new windows. Grouped mode stops the helper and restores the app's normal grouping without restarting ChatGPT.
+* Add installer option `-TaskbarMode Grouped|Separate`; upgrades preserve the saved choice when this option is omitted.
+* Add native shell-property and configuration tests. Keep each account's login and Codex data in its existing isolated profile.
+
 ## 0.1.2 - 2026-10-21
 
 - Changed: profile icons are now the app's own flat ChatGPT logo in the profile's color, without a badge. The old icon was built from the app's shaded window icon, which looked faded on dark backgrounds such as the Start menu.

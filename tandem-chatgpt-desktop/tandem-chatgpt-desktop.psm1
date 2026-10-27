@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 tandem-chatgpt-desktop: run the ChatGPT desktop app for Windows (Microsoft Store package
 OpenAI.Codex) as several isolated instances, one per account, side by side.
@@ -36,6 +36,166 @@ $script:Palette = [ordered]@{
 }
 
 #region Private helpers
+
+function Assert-NoLinkedAncestor {
+    param([Parameter(Mandatory)][string]$Path)
+    $current = [IO.Path]::GetFullPath($Path)
+    while ($current) {
+        if (Test-Path -LiteralPath $current) {
+            $item = Get-Item -LiteralPath $current -Force
+            if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Linked taskbar path is unsupported: $current" }
+        }
+        $current = Split-Path -Path $current -Parent
+    }
+}
+
+function Initialize-TaskbarApi {
+    if (-not ('Tandem.ChatGPT.TaskbarIdentity' -as [type])) {
+        Add-Type -Path (Join-Path (Split-Path $PSScriptRoot -Parent) 'taskbar-identity.cs')
+    }
+}
+
+function Get-TaskbarAppId {
+    param([Parameter(Mandatory)][string]$Root, [Parameter(Mandatory)][string]$Name)
+    Assert-ProfileName $Name
+    $normalized = (Resolve-ProfileRoot $Root).ToLowerInvariant()
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { $hash = -join ($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($normalized))[0..5] | ForEach-Object { $_.ToString('x2') }) }
+    finally { $sha.Dispose() }
+    'Tandem.ChatGPT.' + $hash + '.' + $Name.ToLowerInvariant()
+}
+
+function Get-TaskbarLaunchCommand {
+    param([Parameter(Mandatory)][string]$Root, [Parameter(Mandatory)][string]$Name)
+    $directory = Join-Path (Resolve-ProfileRoot $Root) 'main-launcher'
+    if ($Name -ne 'main') { $directory = (Get-ProfileLayout $Name $Root).Dir }
+    # Window relaunch properties have a short string limit. Delegate through a
+    # private copy of the account shortcut, retaining its full launch arguments.
+    '"{0}" "{1}"' -f (Join-Path $env:SystemRoot 'explorer.exe'), (Join-Path $directory 'taskbar-launch.lnk')
+}
+
+function Get-TaskbarProfile {
+    param([Parameter(Mandatory)][string]$Root)
+    $settings = Get-Content -LiteralPath (Join-Path $Root 'taskbar.json') -Raw | ConvertFrom-Json
+    [pscustomobject]@{ Name = 'main'; Label = 'ChatGPT (Main)'; UserData = $null;
+        Icon = $settings.mainIcon; AppId = (Get-TaskbarAppId $Root main); Command = (Get-TaskbarLaunchCommand $Root main) }
+    foreach ($folder in @(Get-ChildItem -LiteralPath $Root -Directory)) {
+        $metaPath = Join-Path $folder.FullName 'profile.json'
+        if (-not (Test-Path -LiteralPath $metaPath)) { continue }
+        $layout = Get-ProfileLayout $folder.Name $Root
+        $meta = Read-ProfileMeta $layout
+        $icon = Get-ChildItem -LiteralPath $layout.Dir -Filter 'icon-*.ico' -File | Select-Object -First 1
+        if ($null -eq $icon) { continue }
+        [pscustomobject]@{ Name = $layout.Name; Label = ('ChatGPT (' + $meta.label + ')'); UserData = $layout.UserData;
+            Icon = $icon.FullName; AppId = (Get-TaskbarAppId $Root $layout.Name); Command = (Get-TaskbarLaunchCommand $Root $layout.Name) }
+    }
+}
+
+function Get-TaskbarHelperProcess {
+    param([Parameter(Mandatory)][string]$Root)
+    $statePath = Join-Path $Root 'taskbar-helper.json'
+    if (-not (Test-Path -LiteralPath $statePath)) { return }
+    try { $state = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json } catch { return }
+    $helper = Join-Path (Split-Path $PSScriptRoot -Parent) 'taskbar-helper.ps1'
+    Get-CimInstance -ClassName Win32_Process -Filter ("ProcessId=" + [int]$state.pid) | Where-Object {
+        $_.Name -eq 'powershell.exe' -and $_.CommandLine -and
+        $_.CommandLine.IndexOf(('"' + $helper + '"'), [StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+        $_.CommandLine.IndexOf(('-Root "' + $Root + '"'), [StringComparison]::OrdinalIgnoreCase) -ge 0
+    }
+}
+
+function Start-ProfileTaskbarHelper {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Private helper; the calling launcher checks ShouldProcess.')]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Root)
+    $settings = Join-Path $Root 'taskbar.json'
+    if (-not (Test-Path -LiteralPath $settings) -or -not (Get-Content -LiteralPath $settings -Raw | ConvertFrom-Json).enabled) { return }
+    if ($null -ne (Get-TaskbarHelperProcess $Root)) { return }
+    $helper = Join-Path (Split-Path $PSScriptRoot -Parent) 'taskbar-helper.ps1'
+    $arguments = '-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}" -Root "{1}"' -f $helper, $Root
+    $null = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList $arguments -WindowStyle Hidden
+}
+
+function Stop-ProfileTaskbarHelper {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Private helper; the calling command checks ShouldProcess.')]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Root)
+    if ($null -eq (Get-TaskbarHelperProcess $Root)) { return }
+    $stopPath = Join-Path $Root 'taskbar-stop'
+    $null = New-Item -ItemType File -Path $stopPath -Force
+    for ($attempt = 0; $attempt -lt 30; $attempt++) {
+        if ($null -eq (Get-TaskbarHelperProcess $Root)) { return }
+        Start-Sleep -Milliseconds 250
+    }
+    throw 'The taskbar helper is still stopping. Try again in a few seconds.'
+}
+
+function Set-ShortcutTaskbarIdentity {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Private helper; shortcut creation checks ShouldProcess.')]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Root, [Parameter(Mandatory)][string]$Name)
+    $settings = Join-Path $Root 'taskbar.json'
+    if (-not (Test-Path -LiteralPath $settings)) { return }
+    Initialize-TaskbarApi
+    $id = $null
+    if ((Get-Content -LiteralPath $settings -Raw | ConvertFrom-Json).enabled) { $id = Get-TaskbarAppId $Root $Name }
+    [Tandem.ChatGPT.TaskbarIdentity]::SetShortcut($Path, $id)
+}
+
+
+function Start-PrimaryChatGPT {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Private helper; the calling launcher checks ShouldProcess.')]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Root)
+    $app = Get-ChatGPTPackage
+    $directory = Join-Path $Root 'main-launcher'
+    Assert-NoLinkedAncestor $directory
+    $null = New-Item -ItemType Directory -Path $directory -Force
+    $wrapper = Join-Path $directory 'launch.cmd'
+    @('@echo off', 'set "CODEX_HOME="', 'set "CODEX_ELECTRON_USER_DATA_PATH="',
+        ('start "" "' + $app.Exe + '"')) | Set-Content -LiteralPath $wrapper -Encoding Ascii
+    Invoke-InPackage -FamilyName $app.FamilyName -ScriptPath $wrapper
+    Start-ProfileTaskbarHelper -Root $Root
+}
+
+function Save-MainTaskbarShortcut {
+    param([Parameter(Mandatory)][string]$Root, [Parameter(Mandatory)]$App)
+    $cli = Join-Path (Split-Path $PSScriptRoot -Parent) 'chatgpt-profile.ps1'
+    $directory = Join-Path $Root 'main-launcher'
+    $null = New-Item -ItemType Directory -Path $directory -Force
+    $shell = New-Object -ComObject WScript.Shell
+    $paths = @()
+    try {
+        foreach ($folder in @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'))) {
+            $path = Join-Path $folder 'ChatGPT (Main).lnk'
+            $link = $shell.CreateShortcut($path)
+            $link.TargetPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+            $link.Arguments = '-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}" launch main -Root "{1}" -Gui' -f $cli, $Root
+            $link.WorkingDirectory = $Root
+            $link.IconLocation = $App.Exe + ',0'
+            $link.WindowStyle = 7
+            $link.Description = 'Open the primary ChatGPT account'
+            $link.Save()
+            Set-ShortcutTaskbarIdentity -Path $path -Root $Root -Name main
+            Copy-Item -LiteralPath $path -Destination (Join-Path $directory 'taskbar-launch.lnk') -Force
+            $paths += $path
+        }
+    } finally { $null = [Runtime.InteropServices.Marshal]::ReleaseComObject($shell) }
+    ConvertTo-Json -InputObject $paths | Set-Content -LiteralPath (Join-Path $Root 'taskbar-shortcuts.json') -Encoding UTF8
+}
+
+function Remove-TaskbarMainShortcut {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Private helper; uninstaller checks ShouldProcess.')]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Root)
+    $manifest = Join-Path $Root 'taskbar-shortcuts.json'
+    if (-not (Test-Path -LiteralPath $manifest)) { return }
+    $allowed = @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs')) | ForEach-Object { Join-Path $_ 'ChatGPT (Main).lnk' }
+    foreach ($path in @(Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json)) {
+        if ($path -in $allowed -and (Test-Path -LiteralPath $path)) { Remove-Item -LiteralPath $path -Force }
+    }
+    Remove-Item -LiteralPath $manifest -Force
+}
 
 function Get-DefaultProfileRoot {
     Join-Path -Path $env:USERPROFILE -ChildPath 'tandem-chatgpt-desktop'
@@ -282,6 +442,10 @@ function Save-ProfileShortcut {
         $link.WindowStyle = 7
         $link.Description = "ChatGPT, separate profile '$($Layout.Name)'"
         $link.Save()
+        Set-ShortcutTaskbarIdentity -Path $path -Root $Layout.Root -Name $Layout.Name
+        if (Test-Path -LiteralPath (Join-Path $Layout.Root 'taskbar.json')) {
+            Copy-Item -LiteralPath $path -Destination (Join-Path $Layout.Dir 'taskbar-launch.lnk') -Force
+        }
     } finally {
         $null = [Runtime.InteropServices.Marshal]::ReleaseComObject($shell)
     }
@@ -509,6 +673,42 @@ function Get-CheckResult {
 
 #region Public commands
 
+function Set-ChatGPTProfileTaskbar {
+    <#
+    .SYNOPSIS
+    Chooses grouped or separate taskbar icons for ChatGPT accounts.
+    .DESCRIPTION
+    A hidden helper maintains window properties while ChatGPT is running. It does
+    not patch or inject into ChatGPT. Disable restores the live window properties.
+    #>
+    [CmdletBinding(SupportsShouldProcess)]
+    param([string]$Root = (Get-DefaultProfileRoot), [ValidateSet('Grouped', 'Separate')][string]$Mode = 'Separate', [switch]$Disable)
+    if ($Disable) { $Mode = 'Grouped' }
+    $separate = $Mode -eq 'Separate'
+    $selectedMode = 'Grouped'
+    if ($separate) { $selectedMode = 'Separate' }
+    $rootPath = Resolve-ProfileRoot $Root
+    if (Test-Path -LiteralPath (Join-Path $rootPath 'main\profile.json')) {
+        throw "A managed profile named 'main' conflicts with the native account shortcut. Rename that profile before enabling taskbar options."
+    }
+    if (-not $PSCmdlet.ShouldProcess($rootPath, 'Update per-account ChatGPT taskbar identities')) { return }
+    $null = New-Item -ItemType Directory -Path $rootPath -Force
+    Stop-ProfileTaskbarHelper -Root $rootPath
+    $app = Get-ChatGPTPackage
+    $mainDir = Join-Path $rootPath 'main-launcher'
+    Assert-NoLinkedAncestor -Path $mainDir
+    $null = New-Item -ItemType Directory -Path $mainDir -Force
+    $mainIcon = Save-ProfileIcon -App $app -Layout ([pscustomobject]@{ Dir = $mainDir }) -ColorHex $script:Palette.Orange
+    @{ mode = $selectedMode; enabled = $separate; mainIcon = $mainIcon } | ConvertTo-Json |
+        Set-Content -LiteralPath (Join-Path $rootPath 'taskbar.json') -Encoding UTF8
+    Save-MainTaskbarShortcut -Root $rootPath -App $app
+    foreach ($managedProfile in @(Get-ChatGPTProfile -Root $rootPath)) {
+        $null = New-ChatGPTProfile -Name $managedProfile.Name -Root $rootPath -Label $managedProfile.Label
+    }
+    if ($separate) { Start-ProfileTaskbarHelper -Root $rootPath }
+    [pscustomobject]@{ Mode = $selectedMode; Enabled = $separate; Root = $rootPath }
+}
+
 function New-ChatGPTProfile {
     <#
     .SYNOPSIS
@@ -563,6 +763,7 @@ function New-ChatGPTProfile {
             shortcuts = $shortcuts
         })
     Write-ProfileLog -Layout $layout -Message "profile created or updated (label '$Label')"
+    Start-ProfileTaskbarHelper -Root $layout.Root
     Get-ChatGPTProfile -Name $Name -Root $layout.Root
 }
 
@@ -585,6 +786,12 @@ function Start-ChatGPTProfile {
         [string]$Root = (Get-DefaultProfileRoot),
         [ValidateRange(1, 600)][int]$VerifySeconds = 45
     )
+    if ($Name -eq 'main' -and -not (Test-Path -LiteralPath (Join-Path (Resolve-ProfileRoot $Root) 'main\profile.json'))) {
+        $rootPath = Resolve-ProfileRoot $Root
+        if (-not $PSCmdlet.ShouldProcess('Primary ChatGPT account', 'Start')) { return }
+        Start-PrimaryChatGPT -Root $rootPath
+        return [pscustomobject]@{ Name = 'main'; Status = 'Opened' }
+    }
     $layout = Get-ProfileLayout -Name $Name -Root $Root
     if (-not (Test-Path -LiteralPath $layout.CodexHome)) {
         throw "Profile '$Name' does not exist in $($layout.Root). Create it first: chatgpt-profile new $Name"
@@ -599,6 +806,7 @@ function Start-ChatGPTProfile {
     $alreadyRunning = @(Get-ProfileProcess -Layout $layout).Count -gt 0
     $started = Get-Date
     Invoke-InPackage -FamilyName $app.FamilyName -ScriptPath $layout.LaunchCmd
+    Start-ProfileTaskbarHelper -Root $layout.Root
     Write-ProfileLog -Layout $layout -Message "launch requested (app $($app.Version), already running: $alreadyRunning)"
     if ($alreadyRunning) {
         # Same data folder, so the running instance just comes to the front.
@@ -777,4 +985,4 @@ function Test-ChatGPTProfileSupport {
 
 #endregion
 
-Export-ModuleMember -Function New-ChatGPTProfile, Start-ChatGPTProfile, Stop-ChatGPTProfile, Get-ChatGPTProfile, Remove-ChatGPTProfile, Test-ChatGPTProfileSupport
+Export-ModuleMember -Function New-ChatGPTProfile, Start-ChatGPTProfile, Stop-ChatGPTProfile, Get-ChatGPTProfile, Remove-ChatGPTProfile, Test-ChatGPTProfileSupport, Set-ChatGPTProfileTaskbar

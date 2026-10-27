@@ -1,10 +1,11 @@
-#Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.5.0' }
+﻿#Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.5.0' }
 
-# Unit tests. Nothing here starts ChatGPT or touches real profiles, shortcuts or the
-# Store package: package lookups, process lookups and the in-package launch are mocked.
+# Tests use temporary profiles/shortcuts and an invisible native test window.
+# Package lookups, process lookups and in-package launches are mocked.
 
 BeforeAll {
     Import-Module (Join-Path $PSScriptRoot '..\tandem-chatgpt-desktop\tandem-chatgpt-desktop.psd1') -Force
+    Mock -ModuleName tandem-chatgpt-desktop Start-ProfileTaskbarHelper { }
     Add-Type -AssemblyName System.Drawing
 
     function New-TestPng([int]$Size) {
@@ -546,7 +547,7 @@ Describe 'install.ps1' {
         $repo = Join-Path $PSScriptRoot '..'
         $src = Join-Path $TestDrive 'download'
         $null = New-Item -ItemType Directory -Force -Path (Join-Path $src 'tandem-chatgpt-desktop')
-        foreach ($file in 'install.ps1', 'chatgpt-profile.ps1', 'uninstall.ps1', 'README.md', 'LICENSE') {
+        foreach ($file in 'install.ps1', 'chatgpt-profile.ps1', 'taskbar-helper.ps1', 'taskbar-identity.cs', 'uninstall.ps1', 'README.md', 'CHANGELOG.md', 'VALIDATION.md', 'LICENSE') {
             Copy-Item -LiteralPath (Join-Path $repo $file) -Destination $src
         }
         Copy-Item -Path (Join-Path $repo 'tandem-chatgpt-desktop\*') -Destination (Join-Path $src 'tandem-chatgpt-desktop')
@@ -563,7 +564,7 @@ Describe 'install.ps1' {
 
     It 'installs the scripts, module and cmd shim' {
         $installExit | Should -Be 0
-        foreach ($file in 'chatgpt-profile.ps1', 'chatgpt-profile.cmd', 'uninstall.ps1', 'README.md', 'LICENSE',
+        foreach ($file in 'chatgpt-profile.ps1', 'chatgpt-profile.cmd', 'taskbar-helper.ps1', 'taskbar-identity.cs', 'uninstall.ps1', 'README.md', 'CHANGELOG.md', 'VALIDATION.md', 'LICENSE',
             'tandem-chatgpt-desktop\tandem-chatgpt-desktop.psd1', 'tandem-chatgpt-desktop\tandem-chatgpt-desktop.psm1') {
             Join-Path $dest $file | Should -Exist
         }
@@ -581,6 +582,115 @@ Describe 'install.ps1' {
     It 'leaves a module that imports under a RemoteSigned execution policy' {
         $manifest = Join-Path $dest 'tandem-chatgpt-desktop\tandem-chatgpt-desktop.psd1'
         $count = & $hostExe -NoProfile -ExecutionPolicy RemoteSigned -Command "Import-Module '$manifest' -ErrorAction Stop; (Get-Command -Module tandem-chatgpt-desktop).Count"
-        $count | Should -Be '6'
+        $count | Should -Be '7'
+    }
+}
+
+Describe 'Taskbar profile identities' {
+    It 'does not repurpose an existing managed main profile as the native account' {
+        $conflictingRoot = Join-Path $TestDrive 'reserved-name'
+        $null = New-Item -ItemType Directory -Path (Join-Path $conflictingRoot 'main') -Force
+        '{}' | Set-Content (Join-Path $conflictingRoot 'main\profile.json')
+        { Set-ChatGPTProfileTaskbar -Root $conflictingRoot -Mode Separate } | Should -Throw '*conflicts with the native account*'
+        Test-Path (Join-Path $conflictingRoot 'taskbar.json') | Should -BeFalse
+    }
+    It 'persists the selected taskbar mode: <Mode>' -ForEach @(
+        @{ Mode = 'Grouped'; ExpectedEnabled = $false }, @{ Mode = 'Separate'; ExpectedEnabled = $true }
+    ) {
+        Mock -ModuleName tandem-chatgpt-desktop Stop-ProfileTaskbarHelper { }
+        Mock -ModuleName tandem-chatgpt-desktop Get-ChatGPTPackage { [pscustomobject]@{} }
+        Mock -ModuleName tandem-chatgpt-desktop Save-ProfileIcon { 'synthetic.ico' }
+        Mock -ModuleName tandem-chatgpt-desktop Save-MainTaskbarShortcut { }
+        Mock -ModuleName tandem-chatgpt-desktop Get-ChatGPTProfile { }
+        $result = Set-ChatGPTProfileTaskbar -Root $TestDrive -Mode $Mode
+        $result.Mode | Should -Be $Mode
+        $config = Get-Content (Join-Path $TestDrive 'taskbar.json') -Raw | ConvertFrom-Json
+        $config.mode | Should -Be $Mode
+        $config.enabled | Should -Be $ExpectedEnabled
+        Should -Invoke -ModuleName tandem-chatgpt-desktop Stop-ProfileTaskbarHelper -Times 1 -Exactly
+    }
+    It 'keeps Disable as an alias for grouped mode' {
+        Mock -ModuleName tandem-chatgpt-desktop Stop-ProfileTaskbarHelper { }
+        Mock -ModuleName tandem-chatgpt-desktop Get-ChatGPTPackage { [pscustomobject]@{} }
+        Mock -ModuleName tandem-chatgpt-desktop Save-ProfileIcon { 'synthetic.ico' }
+        Mock -ModuleName tandem-chatgpt-desktop Save-MainTaskbarShortcut { }
+        Mock -ModuleName tandem-chatgpt-desktop Get-ChatGPTProfile { }
+        (Set-ChatGPTProfileTaskbar -Root $TestDrive -Disable).Mode | Should -Be 'Grouped'
+    }
+    It 'rejects invalid modes and leaves configuration untouched under WhatIf' {
+        $untouchedRoot = Join-Path $TestDrive 'whatif-taskbar'
+        { Set-ChatGPTProfileTaskbar -Root $untouchedRoot -Mode invalid } | Should -Throw
+        Set-ChatGPTProfileTaskbar -Root $untouchedRoot -Mode Grouped -WhatIf
+        Test-Path (Join-Path $untouchedRoot 'taskbar.json') | Should -BeFalse
+    }
+    It 'exports the taskbar setup command used by the installed CLI' {
+        Get-Command Set-ChatGPTProfileTaskbar -Module tandem-chatgpt-desktop | Should -Not -BeNullOrEmpty
+    }
+    It 'keeps stable, distinct, case-insensitive identities within the Windows length limit' {
+        InModuleScope tandem-chatgpt-desktop {
+            $first = Get-TaskbarAppId 'C:\Profiles' account2
+            $first | Should -Be (Get-TaskbarAppId 'c:\profiles\' ACCOUNT2)
+            $first | Should -Not -Be (Get-TaskbarAppId 'C:\Profiles' main)
+            $first | Should -Not -Be (Get-TaskbarAppId 'C:\Other' account2)
+            (Get-TaskbarAppId 'C:\Profiles' ('a' * 64)).Length | Should -BeLessOrEqual 128
+        }
+    }
+    It 'uses short, separate account shortcuts for pinned-icon relaunch commands' {
+        InModuleScope tandem-chatgpt-desktop -Parameters @{ R = $TestDrive } {
+            param($R)
+            Get-TaskbarLaunchCommand $R main | Should -BeLike '*explorer.exe*main-launcher\taskbar-launch.lnk*'
+            Get-TaskbarLaunchCommand $R account2 | Should -BeLike '*explorer.exe*account2\taskbar-launch.lnk*'
+        }
+    }
+    It 'round-trips a shortcut identity without changing its launch target or arguments' {
+        InModuleScope tandem-chatgpt-desktop -Parameters @{ R = $TestDrive } {
+            param($R)
+            Initialize-TaskbarApi
+            $path = Join-Path $R 'test.lnk'
+            $shell = New-Object -ComObject WScript.Shell
+            try {
+                $link = $shell.CreateShortcut($path)
+                $link.TargetPath = Join-Path $env:SystemRoot 'System32\notepad.exe'
+                $link.Arguments = 'synthetic.txt'
+                $link.Save()
+                [Tandem.ChatGPT.TaskbarIdentity]::SetShortcut($path, 'Tandem.ChatGPT.Test')
+                [Tandem.ChatGPT.TaskbarIdentity]::ReadShortcut($path) | Should -Be 'Tandem.ChatGPT.Test'
+                $read = $shell.CreateShortcut($path)
+                $read.Arguments | Should -Be 'synthetic.txt'
+                $read.TargetPath | Should -Be $link.TargetPath
+                [Tandem.ChatGPT.TaskbarIdentity]::SetShortcut($path, $null)
+                [Tandem.ChatGPT.TaskbarIdentity]::ReadShortcut($path) | Should -BeNullOrEmpty
+            } finally { $null = [Runtime.InteropServices.Marshal]::ReleaseComObject($shell) }
+        }
+    }
+    It 'sets and restores window identities and relaunch details on an invisible test window' {
+        InModuleScope tandem-chatgpt-desktop {
+            Initialize-TaskbarApi
+            Add-Type -AssemblyName System.Windows.Forms
+            $form = New-Object Windows.Forms.Form
+            try {
+                $handle = $form.Handle
+                $original = [Tandem.ChatGPT.TaskbarIdentity]::ReadWindow($handle, 5)
+                [Tandem.ChatGPT.TaskbarIdentity]::Apply($handle, 'Tandem.ChatGPT.Test', 'synthetic.exe', 'Synthetic profile', 'nonexistent-test.ico')
+                [Tandem.ChatGPT.TaskbarIdentity]::ReadWindow($handle, 5) | Should -Be 'Tandem.ChatGPT.Test'
+                [Tandem.ChatGPT.TaskbarIdentity]::ReadWindow($handle, 2) | Should -Be 'synthetic.exe'
+                [Tandem.ChatGPT.TaskbarIdentity]::ReadWindow($handle, 4) | Should -Be 'Synthetic profile'
+                [Tandem.ChatGPT.TaskbarIdentity]::RestoreAll()
+                [Tandem.ChatGPT.TaskbarIdentity]::ReadWindow($handle, 5) | Should -Be $original
+            } finally { [Tandem.ChatGPT.TaskbarIdentity]::RestoreAll(); $form.Dispose() }
+        }
+    }
+    It 'ignores a reused helper process ID belonging to a different command' {
+        InModuleScope tandem-chatgpt-desktop -Parameters @{ R = $TestDrive } {
+            param($R)
+            '{"pid":123}' | Set-Content -LiteralPath (Join-Path $R 'taskbar-helper.json')
+            Mock Get-CimInstance { [pscustomobject]@{ Name = 'powershell.exe'; CommandLine = 'powershell.exe -File unrelated.ps1' } }
+            Get-TaskbarHelperProcess $R | Should -BeNullOrEmpty
+        }
+    }
+    It 'does not launch the primary app when WhatIf is requested' {
+        Mock -ModuleName tandem-chatgpt-desktop Start-PrimaryChatGPT { }
+        Start-ChatGPTProfile main -Root $TestDrive -WhatIf
+        Should -Invoke -ModuleName tandem-chatgpt-desktop Start-PrimaryChatGPT -Times 0
     }
 }

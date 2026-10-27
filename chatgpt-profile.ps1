@@ -6,6 +6,7 @@
   chatgpt-profile new <name> [-Label <text>] [-Color <color>]
                              [-NoDesktopShortcut] [-NoStartMenuShortcut]
   chatgpt-profile launch <name>
+  chatgpt-profile taskbar [grouped|separate] [-Disable]
   chatgpt-profile list
   chatgpt-profile stop <name>
   chatgpt-profile remove <name> [-KeepData] [-Force]
@@ -20,7 +21,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('new', 'launch', 'list', 'stop', 'remove', 'doctor', 'help')]
+    [ValidateSet('new', 'launch', 'taskbar', 'list', 'stop', 'remove', 'doctor', 'help')]
     [string]$Command = 'help',
 
     [Parameter(Position = 1)][string]$Name,
@@ -32,6 +33,7 @@ param(
     [switch]$KeepData,
     [switch]$Force,
     [switch]$Deep,
+    [switch]$Disable,
     # Used by shortcuts: report errors in a message box because there is no console.
     [switch]$Gui
 )
@@ -62,6 +64,11 @@ try {
             }
         }
         'launch' { $null = Start-ChatGPTProfile -Name $Name @common }
+        'taskbar' {
+            $mode = 'Separate'
+            if ($Name) { $mode = $Name }
+            Set-ChatGPTProfileTaskbar -Mode $mode -Disable:$Disable @common | Format-List
+        }
         'list' { Get-ChatGPTProfile @common | Format-Table -AutoSize | Out-String | Write-Output }
         'stop' { Stop-ChatGPTProfile -Name $Name @common }
         'remove' {

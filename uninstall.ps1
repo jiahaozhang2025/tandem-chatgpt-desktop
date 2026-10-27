@@ -26,7 +26,7 @@ $destinationPath = [IO.Path]::GetFullPath($Destination).TrimEnd('\')
 $manifest = Join-Path -Path $destinationPath -ChildPath 'tandem-chatgpt-desktop\tandem-chatgpt-desktop.psd1'
 if (-not (Test-Path -LiteralPath $manifest)) { throw "chatgpt-profile is not installed in $destinationPath." }
 
-Import-Module -Name $manifest -Force
+$installedModule = Import-Module -Name $manifest -Force -PassThru
 $common = @{}
 if ($Root) { $common.Root = $Root }
 $profiles = @(Get-ChatGPTProfile @common)
@@ -35,6 +35,9 @@ $action = "Uninstall chatgpt-profile and remove the shortcuts of $($profiles.Cou
 if ($RemoveProfiles) { $action = "Uninstall chatgpt-profile and delete $($profiles.Count) profile(s) including their logins" }
 
 if ($PSCmdlet.ShouldProcess($destinationPath, $action)) {
+    $profileRoot = $Root
+    if (-not $profileRoot) { $profileRoot = Join-Path $env:USERPROFILE 'tandem-chatgpt-desktop' }
+    & $installedModule { param($R) Stop-ProfileTaskbarHelper -Root $R; Remove-TaskbarMainShortcut -Root $R } $profileRoot
     foreach ($p in $profiles) {
         Remove-ChatGPTProfile -Name $p.Name -KeepData:(-not $RemoveProfiles) -Confirm:$false @common
     }

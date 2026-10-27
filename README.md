@@ -4,7 +4,7 @@ Run two (or more) ChatGPT desktop accounts at the same time on Windows, each in 
 
 **Looking for Claude?** Use the companion [tandem-claude-desktop](https://github.com/jiahaozhang2025/tandem-claude-desktop) launcher, which also includes sign-in routing and experimental Code-history handoff. Each project has its own installer and releases.
 
-It's one small PowerShell module. It doesn't modify the app, inject code into it, open a debugging port, proxy your requests, or leave anything running in the background.
+The launcher doesn't modify the app, inject code into it, open a debugging port or proxy your requests. Optional separate taskbar icons use a hidden helper while the app is running.
 
 > **Unofficial.** Not affiliated with or endorsed by OpenAI. ChatGPT is a trademark of OpenAI.
 > This is for people with more than one ChatGPT account of their own, such as personal and work.
@@ -45,6 +45,8 @@ A **ChatGPT (Account 2)** entry appears in the Start menu and on your desktop, w
 |---|---|
 | `chatgpt-profile new <name> [-Label <text>] [-Color <color>] [-NoDesktopShortcut] [-NoStartMenuShortcut]` | Create a profile and its Start menu and desktop shortcuts. Running it on an existing profile keeps its data and refreshes the icon and shortcuts. |
 | `chatgpt-profile launch <name>` | Open the profile's window, or bring it to the front if it's already open. This is what the shortcut runs. |
+| `chatgpt-profile launch main` | Open the primary account using its normal data folders. |
+| `chatgpt-profile taskbar [grouped\|separate] [-Disable]` | Save the taskbar grouping choice and update running windows and shortcuts. |
 | `chatgpt-profile list` | Show profiles, whether each is running, and whether it has a saved login. |
 | `chatgpt-profile stop <name>` | End the profile's instance and everything it started, like End task in Task Manager. Closing a ChatGPT window only hides it to the system tray; use the tray icon's Quit to exit normally. |
 | `chatgpt-profile remove <name> [-KeepData] [-Force]` | Remove the profile's shortcuts and, unless `-KeepData`, its folder including its login. |
@@ -53,7 +55,22 @@ A **ChatGPT (Account 2)** entry appears in the Start menu and on your desktop, w
 Every command takes `-Root <folder>` to keep profiles somewhere other than `%USERPROFILE%\tandem-chatgpt-desktop`.
 Colors: Orange, Blue, Green, Purple, Red, Teal, Pink, Gray.
 
-The same commands are available as PowerShell functions (`New-ChatGPTProfile`, `Start-ChatGPTProfile`, `Get-ChatGPTProfile`, `Stop-ChatGPTProfile`, `Remove-ChatGPTProfile`, `Test-ChatGPTProfileSupport`) after `Import-Module "$env:LOCALAPPDATA\Programs\tandem-chatgpt-desktop\tandem-chatgpt-desktop"`.
+The same commands are available as PowerShell functions (`New-ChatGPTProfile`, `Start-ChatGPTProfile`, `Get-ChatGPTProfile`, `Stop-ChatGPTProfile`, `Remove-ChatGPTProfile`, `Test-ChatGPTProfileSupport`, `Set-ChatGPTProfileTaskbar`) after `Import-Module "$env:LOCALAPPDATA\Programs\tandem-chatgpt-desktop\tandem-chatgpt-desktop"`.
+
+## Taskbar grouping option
+
+```powershell
+# Separate colored icons for each account:
+& "$env:LOCALAPPDATA\Programs\tandem-chatgpt-desktop\chatgpt-profile.cmd" taskbar separate
+# Restore the app's normal grouped taskbar button:
+& "$env:LOCALAPPDATA\Programs\tandem-chatgpt-desktop\chatgpt-profile.cmd" taskbar grouped
+```
+
+The choice is saved per profile root and survives future launches and upgrades. A fresh root uses normal grouping until separate mode is selected. Running `taskbar` without a mode selects separate mode; `taskbar -Disable` is an alias for grouped mode. Choose during installation with `install.ps1 -TaskbarMode Grouped` or `install.ps1 -TaskbarMode Separate`, optionally with `-Root`. Omitting that installer option preserves your existing choice.
+
+Separate mode gives each account's windows and shortcuts a matching Windows taskbar identity and colored icon. It also creates **ChatGPT (Main)** to open the primary account. Pin the individual account shortcuts or running buttons if you want their icons available while closed. Windows keeps copies of pinned shortcuts; if a pin retains the old layout after changing modes, unpin it and pin the refreshed shortcut.
+
+A hidden PowerShell helper maintains the separate identities on new windows. It exits after ChatGPT has been closed for 30 seconds. Grouped mode stops it and restores the live windows' previous taskbar properties without restarting ChatGPT. Both modes retain separate logins and data folders, and neither changes global taskbar settings. The native account shortcut reserves `main` when this option is configured; an older managed profile with that name must be renamed first.
 
 ## How it works
 
@@ -84,7 +101,7 @@ So after every launch, the tool waits up to 45 seconds for the app to write to t
 - **Separate per profile:** the login, local Codex state, settings, MCP servers, skills and plugins, remote connections, and window and browser data.
 - **From your account:** chat history is stored by OpenAI per account, so it shows up after you sign in.
 - **Shared:** the app itself. There is one Store install, and it updates as usual.
-- **Look-alike windows:** both windows look the same and share one taskbar button. In Start and on the desktop, the profile's colored logo tells them apart. It is the same flat logo the app uses, so it stays clear on dark and light backgrounds.
+- **Taskbar:** choose normal grouping or separate colored account icons using the option above. Start menu and desktop shortcuts use the profile's colored logo in either mode.
 - **Links and notifications** that open ChatGPT (such as `codex://` links) go to your main window.
 - **Memory:** each window is a full instance of the app.
 

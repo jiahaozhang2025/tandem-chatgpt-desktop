@@ -1,6 +1,6 @@
 @{
     RootModule           = 'tandem-chatgpt-desktop.psm1'
-    ModuleVersion        = '0.1.2'
+    ModuleVersion        = '0.2.0'
     GUID                 = '6f1d2b7e-3c4a-4e8b-9a51-2d7c8e0f4b13'
     Author               = 'Jiahao Zhang'
     Copyright            = '(c) 2026 Jiahao Zhang. MIT License.'
@@ -14,6 +14,7 @@
         'Get-ChatGPTProfile'
         'Remove-ChatGPTProfile'
         'Test-ChatGPTProfileSupport'
+        'Set-ChatGPTProfileTaskbar'
     )
     CmdletsToExport      = @()
     VariablesToExport    = @()

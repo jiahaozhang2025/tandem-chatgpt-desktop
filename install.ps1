@@ -12,7 +12,9 @@
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param(
-    [string]$Destination = (Join-Path -Path $env:LOCALAPPDATA -ChildPath 'Programs\tandem-chatgpt-desktop')
+    [string]$Destination = (Join-Path -Path $env:LOCALAPPDATA -ChildPath 'Programs\tandem-chatgpt-desktop'),
+    [ValidateSet('Grouped', 'Separate')][string]$TaskbarMode,
+    [string]$Root
 )
 
 $ErrorActionPreference = 'Stop'
@@ -26,7 +28,7 @@ if ($destinationPath -eq [IO.Path]::GetFullPath($source).TrimEnd('\')) {
 if ($PSCmdlet.ShouldProcess($destinationPath, 'Install chatgpt-profile')) {
     $moduleTarget = Join-Path -Path $destinationPath -ChildPath 'tandem-chatgpt-desktop'
     $null = New-Item -ItemType Directory -Force -Path $moduleTarget
-    foreach ($file in 'chatgpt-profile.ps1', 'uninstall.ps1', 'README.md', 'LICENSE') {
+    foreach ($file in 'chatgpt-profile.ps1', 'taskbar-helper.ps1', 'taskbar-identity.cs', 'uninstall.ps1', 'README.md', 'CHANGELOG.md', 'VALIDATION.md', 'LICENSE') {
         Copy-Item -LiteralPath (Join-Path -Path $source -ChildPath $file) -Destination $destinationPath -Force
     }
     foreach ($file in 'tandem-chatgpt-desktop.psd1', 'tandem-chatgpt-desktop.psm1') {
@@ -48,4 +50,10 @@ if ($PSCmdlet.ShouldProcess($destinationPath, 'Install chatgpt-profile')) {
     Write-Output "  `"$cli`" new account2 -Label `"Account 2`""
     Write-Output 'Then open the new shortcut and sign in. Check your setup any time with:'
     Write-Output "  `"$cli`" doctor -Deep"
+    if ($TaskbarMode) {
+        $arguments = @('taskbar', $TaskbarMode)
+        if ($Root) { $arguments += @('-Root', $Root) }
+        & $cli @arguments
+        if ($LASTEXITCODE -ne 0) { throw 'Installed the launcher, but configuring the taskbar mode failed.' }
+    }
 }
