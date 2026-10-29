@@ -14,7 +14,8 @@
 param(
     [string]$Destination = (Join-Path -Path $env:LOCALAPPDATA -ChildPath 'Programs\tandem-chatgpt-desktop'),
     [ValidateSet('Grouped', 'Separate')][string]$TaskbarMode,
-    [string]$Root
+    [string]$Root,
+    [switch]$NoAllAccountsShortcut
 )
 
 $ErrorActionPreference = 'Stop'
@@ -43,6 +44,12 @@ if ($PSCmdlet.ShouldProcess($destinationPath, 'Install chatgpt-profile')) {
     # Import-Module fail under a RemoteSigned execution policy.
     Get-ChildItem -LiteralPath $destinationPath -Recurse -File | Unblock-File
 
+    if (-not $NoAllAccountsShortcut) {
+        Import-Module (Join-Path $moduleTarget 'tandem-chatgpt-desktop.psd1') -Force
+        $shortcutOptions = @{}
+        if ($Root) { $shortcutOptions.Root = $Root }
+        $null = New-ChatGPTAllAccountsShortcut @shortcutOptions
+    }
     $cli = Join-Path -Path $destinationPath -ChildPath 'chatgpt-profile.cmd'
     Write-Output "Installed to $destinationPath"
     Write-Output ''

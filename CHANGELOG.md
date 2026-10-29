@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1 — 2026-10-29
+
+* Add `chatgpt-profile launch-all` and Desktop/Start menu **ChatGPT (All Accounts)** shortcuts, installed by default. Open only missing accounts; skip running accounts without activating or restarting them.
+* Discover all configured profiles on each use and report launch failures after attempting the other accounts.
+
 ## 0.2.0 — 2026-10-26
 
 * Add persistent grouped/separate taskbar options through `chatgpt-profile taskbar grouped` and `chatgpt-profile taskbar separate`.

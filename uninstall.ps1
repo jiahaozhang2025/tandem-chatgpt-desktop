@@ -38,6 +38,7 @@ if ($PSCmdlet.ShouldProcess($destinationPath, $action)) {
     $profileRoot = $Root
     if (-not $profileRoot) { $profileRoot = Join-Path $env:USERPROFILE 'tandem-chatgpt-desktop' }
     & $installedModule { param($R) Stop-ProfileTaskbarHelper -Root $R; Remove-TaskbarMainShortcut -Root $R } $profileRoot
+    & $installedModule { param($R) Remove-AllAccountsShortcut -Root $R } $profileRoot
     foreach ($p in $profiles) {
         Remove-ChatGPTProfile -Name $p.Name -KeepData:(-not $RemoveProfiles) -Confirm:$false @common
     }

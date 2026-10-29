@@ -558,7 +558,7 @@ Describe 'install.ps1' {
         # Run it the way the README says, in the same PowerShell edition as the tests. The
         # Bypass matters: a marked install.ps1 would not run under RemoteSigned.
         $hostExe = (Get-Process -Id $PID).Path
-        $null = & $hostExe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $src 'install.ps1') -Destination $dest
+        $null = & $hostExe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $src 'install.ps1') -Destination $dest -NoAllAccountsShortcut
         $installExit = $LASTEXITCODE
     }
 
@@ -582,7 +582,7 @@ Describe 'install.ps1' {
     It 'leaves a module that imports under a RemoteSigned execution policy' {
         $manifest = Join-Path $dest 'tandem-chatgpt-desktop\tandem-chatgpt-desktop.psd1'
         $count = & $hostExe -NoProfile -ExecutionPolicy RemoteSigned -Command "Import-Module '$manifest' -ErrorAction Stop; (Get-Command -Module tandem-chatgpt-desktop).Count"
-        $count | Should -Be '7'
+        $count | Should -Be '9'
     }
 }
 
@@ -692,5 +692,98 @@ Describe 'Taskbar profile identities' {
         Mock -ModuleName tandem-chatgpt-desktop Start-PrimaryChatGPT { }
         Start-ChatGPTProfile main -Root $TestDrive -WhatIf
         Should -Invoke -ModuleName tandem-chatgpt-desktop Start-PrimaryChatGPT -Times 0
+    }
+}
+
+Describe 'Launch all accounts' {
+    BeforeEach {
+        $allRoot = Join-Path $TestDrive 'all profiles'
+        $null = New-Item -ItemType Directory -Path $allRoot -Force
+        Mock -ModuleName tandem-chatgpt-desktop Get-ChatGPTProfile { [pscustomobject]@{ Name = 'account2' } }
+        Mock -ModuleName tandem-chatgpt-desktop Get-ProfileLayout { [pscustomobject]@{ Name = $Name; UserData = (Join-Path $Root "$Name\electron"); UserDataArg = ('--user-data-dir="' + (Join-Path $Root "$Name\electron") + '"') } }
+        Mock -ModuleName tandem-chatgpt-desktop Start-ChatGPTProfile { [pscustomobject]@{ Name = $Name; Status = 'Started' } }
+    }
+    It 'opens only missing accounts: <Scenario>' -ForEach @(
+        @{ Scenario = 'neither open'; MainOpen = $false; ProfileOpen = $false; Starts = 2 }
+        @{ Scenario = 'main open'; MainOpen = $true; ProfileOpen = $false; Starts = 1 }
+        @{ Scenario = 'profile open'; MainOpen = $false; ProfileOpen = $true; Starts = 1 }
+        @{ Scenario = 'both open'; MainOpen = $true; ProfileOpen = $true; Starts = 0 }
+    ) {
+        Mock -ModuleName tandem-chatgpt-desktop Get-ChatGPTMainProcess {
+            if ($MainOpen) { [pscustomobject]@{ CommandLine = 'ChatGPT.exe'; ProcessId = 10 } }
+            if ($ProfileOpen) { [pscustomobject]@{ CommandLine = ('ChatGPT.exe --user-data-dir="' + (Join-Path $allRoot 'account2\electron') + '"'); ProcessId = 20 } }
+        }
+        $result = @(Start-ChatGPTAllAccounts -Root $allRoot)
+        $result.Count | Should -Be 2
+        @($result | Where-Object Status -EQ AlreadyRunning).Count | Should -Be (2 - $Starts)
+        Should -Invoke -ModuleName tandem-chatgpt-desktop Start-ChatGPTProfile -Times $Starts -Exactly
+        if ($MainOpen) { Should -Invoke -ModuleName tandem-chatgpt-desktop Start-ChatGPTProfile -Times 0 -ParameterFilter { $Name -eq 'main' } }
+        if ($ProfileOpen) { Should -Invoke -ModuleName tandem-chatgpt-desktop Start-ChatGPTProfile -Times 0 -ParameterFilter { $Name -eq 'account2' } }
+    }
+    It 'recognizes an explicitly selected native data folder without relaunching it' {
+        Mock -ModuleName tandem-chatgpt-desktop Get-ChatGPTMainProcess { [pscustomobject]@{ CommandLine = ('ChatGPT.exe --user-data-dir="' + (Join-Path $env:APPDATA 'ChatGPT') + '"'); ProcessId = 10 } }
+        $null = Start-ChatGPTAllAccounts -Root $allRoot
+        Should -Invoke -ModuleName tandem-chatgpt-desktop Start-ChatGPTProfile -Times 1 -Exactly -ParameterFilter { $Name -eq 'account2' -and $Root -eq $allRoot }
+        Should -Invoke -ModuleName tandem-chatgpt-desktop Start-ChatGPTProfile -Times 0 -ParameterFilter { $Name -eq 'main' }
+    }
+    It 'does not mistake an unmanaged profile for the primary account' {
+        Mock -ModuleName tandem-chatgpt-desktop Get-ChatGPTMainProcess { [pscustomobject]@{ CommandLine = 'ChatGPT.exe --user-data-dir="C:\unmanaged\electron"'; ProcessId = 30 } }
+        $null = Start-ChatGPTAllAccounts -Root $allRoot
+        Should -Invoke -ModuleName tandem-chatgpt-desktop Start-ChatGPTProfile -Times 2 -Exactly
+    }
+    It 'tries the other accounts if one fails and reports the error' {
+        Mock -ModuleName tandem-chatgpt-desktop Get-ChatGPTMainProcess { }
+        Mock -ModuleName tandem-chatgpt-desktop Start-ChatGPTProfile { if ($Name -eq 'main') { throw 'synthetic launch failure' } }
+        { Start-ChatGPTAllAccounts -Root $allRoot } | Should -Throw '*main: synthetic launch failure*'
+        Should -Invoke -ModuleName tandem-chatgpt-desktop Start-ChatGPTProfile -Times 1 -Exactly -ParameterFilter { $Name -eq 'account2' }
+    }
+    It 'supports WhatIf without launching any accounts' {
+        Mock -ModuleName tandem-chatgpt-desktop Get-ChatGPTMainProcess { }
+        Start-ChatGPTAllAccounts -Root $allRoot -WhatIf
+        Should -Invoke -ModuleName tandem-chatgpt-desktop Start-ChatGPTProfile -Times 0
+    }
+    It 'rejects a conflicting managed main profile before launching anything' {
+        Mock -ModuleName tandem-chatgpt-desktop Get-ChatGPTProfile { [pscustomobject]@{ Name = 'main' } }
+        { Start-ChatGPTAllAccounts -Root $allRoot } | Should -Throw '*conflicts*'
+        Should -Invoke -ModuleName tandem-chatgpt-desktop Start-ChatGPTProfile -Times 0
+    }
+}
+
+Describe 'All Accounts shortcuts' {
+    BeforeEach {
+        $shortcutRoot = Join-Path $TestDrive ('shortcuts root-' + [guid]::NewGuid())
+        $shortcutFolder = Join-Path $TestDrive ('desktop-' + [guid]::NewGuid())
+        $null = New-Item -ItemType Directory -Path $shortcutFolder -Force
+        Mock -ModuleName tandem-chatgpt-desktop Get-ShortcutFolder { $shortcutFolder }
+        Mock -ModuleName tandem-chatgpt-desktop Get-ChatGPTPackage { [pscustomobject]@{ Exe = 'C:\Vendor\ChatGPT.exe' } }
+    }
+    It 'creates a launch-all shortcut and removes only its own links' {
+        $paths = @(New-ChatGPTAllAccountsShortcut -Root $shortcutRoot)
+        $paths.Count | Should -Be 1
+        $shell = New-Object -ComObject WScript.Shell
+        try {
+            $link = $shell.CreateShortcut($paths[0])
+            $link.Arguments | Should -BeLike '*launch-all -Root*shortcuts root* -Gui'
+            $link.Arguments | Should -Not -BeLike '* switch *'
+            $link.WindowStyle | Should -Be 7
+        } finally { $null = [Runtime.InteropServices.Marshal]::ReleaseComObject($shell) }
+        & (Get-Module tandem-chatgpt-desktop) { param($R) Remove-AllAccountsShortcut -Root $R } $shortcutRoot
+        $paths[0] | Should -Not -Exist
+    }
+    It 'does not remove a link subsequently assigned to another profile root' {
+        $path = @(New-ChatGPTAllAccountsShortcut -Root $shortcutRoot)[0]
+        $shell = New-Object -ComObject WScript.Shell
+        try {
+            $link = $shell.CreateShortcut($path)
+            $link.Arguments = 'launch-all -Root "C:\another-root"'
+            $link.Save()
+        } finally { $null = [Runtime.InteropServices.Marshal]::ReleaseComObject($shell) }
+        & (Get-Module tandem-chatgpt-desktop) { param($R) Remove-AllAccountsShortcut -Root $R } $shortcutRoot
+        $path | Should -Exist
+    }
+    It 'does not create any shortcut or root with WhatIf' {
+        New-ChatGPTAllAccountsShortcut -Root $shortcutRoot -WhatIf
+        $shortcutRoot | Should -Not -Exist
+        @(Get-ChildItem -LiteralPath $shortcutFolder).Count | Should -Be 0
     }
 }

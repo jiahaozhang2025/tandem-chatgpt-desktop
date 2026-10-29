@@ -767,6 +767,99 @@ function New-ChatGPTProfile {
     Get-ChatGPTProfile -Name $Name -Root $layout.Root
 }
 
+function Start-ChatGPTAllAccounts {
+    <#
+    .SYNOPSIS
+    Opens the primary account and configured profiles, skipping running accounts.
+    #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = 'Names the operation on all accounts, matching launch-all in both companion tools.')]
+    [CmdletBinding(SupportsShouldProcess)]
+    param([string]$Root = (Get-DefaultProfileRoot))
+    $rootPath = Resolve-ProfileRoot $Root
+    $profiles = @(Get-ChatGPTProfile -Root $rootPath)
+    if (@($profiles | Where-Object Name -EQ 'main').Count) {
+        throw "A managed profile named 'main' conflicts with the primary account. Rename it before launching all accounts."
+    }
+    $failures = @()
+    foreach ($name in @('main') + @($profiles | Sort-Object Name | ForEach-Object { $_.Name })) {
+        $running = @(Get-ChatGPTMainProcess)
+        if ($name -eq 'main') {
+            $primaryData = Join-Path $env:APPDATA 'ChatGPT'
+            $open = @($running | Where-Object {
+                $match = [regex]::Match($_.CommandLine, '--user-data-dir=(?:"(?<path>[^"]+)"|(?<path>\S+))')
+                -not $match.Success -or $match.Groups['path'].Value.TrimEnd('\') -eq $primaryData
+            }).Count -gt 0
+        } else {
+            $layout = Get-ProfileLayout -Name $name -Root $rootPath
+            $open = @(Get-ProfileProcess -Layout $layout -Process $running).Count -gt 0
+        }
+        if ($open) {
+            [pscustomobject]@{ Name = $name; Status = 'AlreadyRunning' }
+        } elseif ($PSCmdlet.ShouldProcess("ChatGPT account '$name'", 'Open without history transfer')) {
+            try { Start-ChatGPTProfile -Name $name -Root $rootPath -Confirm:$false }
+            catch { $failures += "${name}: $($_.Exception.Message)" }
+        }
+    }
+    if ($failures.Count) { throw ('Some ChatGPT accounts could not be opened: ' + ($failures -join '; ')) }
+}
+
+function New-ChatGPTAllAccountsShortcut {
+    <#
+    .SYNOPSIS
+    Creates Desktop and Start menu shortcuts that open only missing accounts.
+    #>
+    [CmdletBinding(SupportsShouldProcess)]
+    param([string]$Root = (Get-DefaultProfileRoot))
+    $rootPath = Resolve-ProfileRoot $Root
+    if (-not $PSCmdlet.ShouldProcess($rootPath, 'Create ChatGPT (All Accounts) shortcuts')) { return }
+    $app = Get-ChatGPTPackage
+    $cli = Join-Path (Split-Path $PSScriptRoot -Parent) 'chatgpt-profile.ps1'
+    $null = New-Item -ItemType Directory -Path $rootPath -Force
+    $shell = New-Object -ComObject WScript.Shell
+    $paths = @()
+    try {
+        foreach ($folder in @(Get-ShortcutFolder -Desktop -StartMenu)) {
+            $path = Join-Path $folder 'ChatGPT (All Accounts).lnk'
+            $link = $shell.CreateShortcut($path)
+            $link.TargetPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+            $link.Arguments = '-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}" launch-all -Root "{1}" -Gui' -f $cli, $rootPath
+            $link.WorkingDirectory = $rootPath
+            $link.IconLocation = $app.Exe + ',0'
+            $link.WindowStyle = 7
+            $link.Description = 'Open all ChatGPT accounts; leave running accounts untouched'
+            $link.Save()
+            $paths += $path
+        }
+    } finally { $null = [Runtime.InteropServices.Marshal]::ReleaseComObject($shell) }
+    ConvertTo-Json -InputObject $paths | Set-Content -LiteralPath (Join-Path $rootPath 'all-accounts-shortcuts.json') -Encoding UTF8
+    $paths
+}
+
+function Remove-AllAccountsShortcut {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Private helper; uninstaller checks ShouldProcess.')]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Root)
+    $rootPath = Resolve-ProfileRoot $Root
+    $manifest = Join-Path $rootPath 'all-accounts-shortcuts.json'
+    if (-not (Test-Path -LiteralPath $manifest)) { return }
+    $cli = Join-Path (Split-Path $PSScriptRoot -Parent) 'chatgpt-profile.ps1'
+    $expected = '-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}" launch-all -Root "{1}" -Gui' -f $cli, $rootPath
+    $allowed = @(Get-ShortcutFolder -Desktop -StartMenu) | ForEach-Object { Join-Path $_ 'ChatGPT (All Accounts).lnk' }
+    $shell = New-Object -ComObject WScript.Shell
+    try {
+        foreach ($path in @(Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json)) {
+            if ($path -in $allowed -and (Test-Path -LiteralPath $path)) {
+                $link = $shell.CreateShortcut($path)
+                if ($link.Arguments -eq $expected -and $link.TargetPath -eq (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe')) {
+                    Remove-Item -LiteralPath $path -Force
+                }
+            }
+        }
+    } finally { $null = [Runtime.InteropServices.Marshal]::ReleaseComObject($shell) }
+    Remove-Item -LiteralPath $manifest -Force
+}
+
+
 function Start-ChatGPTProfile {
     <#
     .SYNOPSIS
@@ -985,4 +1078,4 @@ function Test-ChatGPTProfileSupport {
 
 #endregion
 
-Export-ModuleMember -Function New-ChatGPTProfile, Start-ChatGPTProfile, Stop-ChatGPTProfile, Get-ChatGPTProfile, Remove-ChatGPTProfile, Test-ChatGPTProfileSupport, Set-ChatGPTProfileTaskbar
+Export-ModuleMember -Function Start-ChatGPTAllAccounts, New-ChatGPTAllAccountsShortcut, New-ChatGPTProfile, Start-ChatGPTProfile, Stop-ChatGPTProfile, Get-ChatGPTProfile, Remove-ChatGPTProfile, Test-ChatGPTProfileSupport, Set-ChatGPTProfileTaskbar

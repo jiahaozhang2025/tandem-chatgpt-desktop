@@ -19,6 +19,16 @@ The launcher doesn't modify the app, inject code into it, open a debugging port 
 
 Tested with ChatGPT 26.1013.3656.0 on Windows 11 (build 26200).
 
+## Open all accounts
+
+After installing or upgrading, use **ChatGPT (All Accounts)** on your desktop or Start menu. It opens your primary account and every configured profile. Already running accounts are skipped without activating or restarting them. You can also run:
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\tandem-chatgpt-desktop\chatgpt-profile.cmd" launch-all
+```
+
+This command opens independent account windows; it does not transfer or merge conversation history. Other profiles are still attempted if one fails, and failures are reported. Installers create the shortcuts automatically; use `-NoAllAccountsShortcut` to opt out. `-Root` selects which profile collection the shortcut opens. Uninstall removes its own All Accounts shortcuts while preserving links reassigned to another root.
+
 ## Install
 
 Download this repository (**Code > Download ZIP**, then extract it) or clone it, then run the installer from its folder:

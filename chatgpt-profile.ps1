@@ -6,6 +6,7 @@
   chatgpt-profile new <name> [-Label <text>] [-Color <color>]
                              [-NoDesktopShortcut] [-NoStartMenuShortcut]
   chatgpt-profile launch <name>
+  chatgpt-profile launch-all
   chatgpt-profile taskbar [grouped|separate] [-Disable]
   chatgpt-profile list
   chatgpt-profile stop <name>
@@ -21,7 +22,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('new', 'launch', 'taskbar', 'list', 'stop', 'remove', 'doctor', 'help')]
+    [ValidateSet('new', 'launch-all', 'launch', 'taskbar', 'list', 'stop', 'remove', 'doctor', 'help')]
     [string]$Command = 'help',
 
     [Parameter(Position = 1)][string]$Name,
@@ -63,6 +64,7 @@ try {
                 Write-Output "Next: open the 'ChatGPT ($($result.Label))' shortcut (or run 'chatgpt-profile launch $Name') and sign in."
             }
         }
+        'launch-all' { Start-ChatGPTAllAccounts @common | Format-Table -AutoSize }
         'launch' { $null = Start-ChatGPTProfile -Name $Name @common }
         'taskbar' {
             $mode = 'Separate'
