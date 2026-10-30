@@ -28,8 +28,15 @@ if ($destinationPath -eq [IO.Path]::GetFullPath($source).TrimEnd('\')) {
 
 if ($PSCmdlet.ShouldProcess($destinationPath, 'Install chatgpt-profile')) {
     $moduleTarget = Join-Path -Path $destinationPath -ChildPath 'tandem-chatgpt-desktop'
+    # Replace a resident shell helper too, without restarting the account apps.
+    $oldManifest = Join-Path $moduleTarget 'tandem-chatgpt-desktop.psd1'
+    if (-not $NoAllAccountsShortcut -and (Test-Path -LiteralPath $oldManifest)) {
+        $oldModule = Import-Module $oldManifest -Force -PassThru
+        & $oldModule { param($R) if (-not $R) { $R = Get-DefaultProfileRoot }; Stop-ProfileTaskbarHelper -Root $R } $Root
+        Remove-Module -ModuleInfo $oldModule -Force
+    }
     $null = New-Item -ItemType Directory -Force -Path $moduleTarget
-    foreach ($file in 'chatgpt-profile.ps1', 'taskbar-helper.ps1', 'taskbar-identity.cs', 'uninstall.ps1', 'README.md', 'CHANGELOG.md', 'VALIDATION.md', 'LICENSE') {
+    foreach ($file in 'chatgpt-profile.ps1', 'taskbar-helper.ps1', 'taskbar-identity.cs', 'uninstall.ps1', 'README.md', 'CHANGELOG.md', 'VALIDATION.md', 'TROUBLESHOOTING.md', 'LICENSE') {
         Copy-Item -LiteralPath (Join-Path -Path $source -ChildPath $file) -Destination $destinationPath -Force
     }
     foreach ($file in 'tandem-chatgpt-desktop.psd1', 'tandem-chatgpt-desktop.psm1') {
@@ -49,6 +56,12 @@ if ($PSCmdlet.ShouldProcess($destinationPath, 'Install chatgpt-profile')) {
         $shortcutOptions = @{}
         if ($Root) { $shortcutOptions.Root = $Root }
         $null = New-ChatGPTAllAccountsShortcut @shortcutOptions
+        & (Get-Module tandem-chatgpt-desktop) {
+            param($R)
+            if (-not $R) { $R = Get-DefaultProfileRoot }
+            Save-MainTaskbarShortcut -Root (Resolve-ProfileRoot $R) -App (Get-ChatGPTPackage)
+            Start-ProfileTaskbarHelper -Root (Resolve-ProfileRoot $R)
+        } $Root
     }
     $cli = Join-Path -Path $destinationPath -ChildPath 'chatgpt-profile.cmd'
     Write-Output "Installed to $destinationPath"

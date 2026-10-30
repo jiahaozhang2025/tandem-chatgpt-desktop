@@ -21,7 +21,9 @@ Tested with ChatGPT 26.1013.3656.0 on Windows 11 (build 26200).
 
 ## Open all accounts
 
-After installing or upgrading, use **ChatGPT (All Accounts)** on your desktop or Start menu. It opens your primary account and every configured profile. Already running accounts are skipped without activating or restarting them. You can also run:
+For recurring startup or missing-icon problems, see [the diagnosis and troubleshooting notes](TROUBLESHOOTING.md).
+
+After installing or upgrading, use **ChatGPT (All Accounts)** on your desktop or Start menu. It opens your primary account and every configured profile. Accounts with a visible window are skipped without activating or restarting them. An account running only in the background is reactivated and checked for a visible window, without restarting it. You can also run:
 
 ```powershell
 & "$env:LOCALAPPDATA\Programs\tandem-chatgpt-desktop\chatgpt-profile.cmd" launch-all

@@ -1,4 +1,4 @@
-﻿#Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.5.0' }
+#Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.5.0' }
 
 # Tests use temporary profiles/shortcuts and an invisible native test window.
 # Package lookups, process lookups and in-package launches are mocked.
@@ -175,6 +175,7 @@ Describe 'Process matching' {
 
 Describe 'Start-ChatGPTProfile' {
     BeforeEach {
+        Mock -ModuleName tandem-chatgpt-desktop Test-DesktopWindow { $true }
         $root = Join-Path $TestDrive 'profiles'
         $null = New-TestProfileFolder -Root $root -Name 'work'
         Mock -ModuleName tandem-chatgpt-desktop Get-ChatGPTPackage { New-FakePackage }
@@ -219,6 +220,13 @@ Describe 'Start-ChatGPTProfile' {
         (Start-ChatGPTProfile -Name 'work' -Root $root).Status | Should -Be 'AlreadyRunning'
         Should -Invoke -ModuleName tandem-chatgpt-desktop Invoke-InPackage -Times 1 -Exactly
         Should -Invoke -ModuleName tandem-chatgpt-desktop Test-FreshWrite -Times 0
+    }
+    It 'does not report success from profile writes alone while its window stays hidden' {
+        Mock -ModuleName tandem-chatgpt-desktop Invoke-InPackage { }
+        Mock -ModuleName tandem-chatgpt-desktop Test-FreshWrite { $true }
+        Mock -ModuleName tandem-chatgpt-desktop Test-DesktopWindow { $false }
+        { Start-ChatGPTProfile -Name work -Root $root -VerifySeconds 1 } | Should -Throw '*no visible account window*No processes were stopped*'
+        Should -Invoke -ModuleName tandem-chatgpt-desktop Close-ProfileProcess -Times 0
     }
 }
 
@@ -331,11 +339,13 @@ Describe 'New-ChatGPTProfile' {
         $null = New-ChatGPTProfile -Name 'work' -Color 'Red' -Root $root -NoStartMenuShortcut -Confirm:$false
 
         $icons = @(Get-ChildItem -LiteralPath (Join-Path $root 'work') -Filter 'icon*.ico')
-        $icons.Count | Should -Be 1
-        $icons[0].Name | Should -Not -Be $old
+        $icons.Count | Should -Be 3
+        Join-Path $root ('work\' + $old) | Should -Exist
+        $meta = Get-Content (Join-Path $root 'work\profile.json') -Raw | ConvertFrom-Json
+        (Split-Path $meta.icon -Leaf) | Should -Not -Be $old
         # The Start menu shortcut was not recreated this time, but it uses the new icon too.
         $link = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $startMenu 'ChatGPT (Work).lnk'))
-        $link.IconLocation | Should -BeLike ('*\' + $icons[0].Name + ',0')
+        $link.IconLocation | Should -BeLike ($meta.icon + ',0')
     }
 
     It 'skips both shortcuts on request' {
@@ -547,7 +557,7 @@ Describe 'install.ps1' {
         $repo = Join-Path $PSScriptRoot '..'
         $src = Join-Path $TestDrive 'download'
         $null = New-Item -ItemType Directory -Force -Path (Join-Path $src 'tandem-chatgpt-desktop')
-        foreach ($file in 'install.ps1', 'chatgpt-profile.ps1', 'taskbar-helper.ps1', 'taskbar-identity.cs', 'uninstall.ps1', 'README.md', 'CHANGELOG.md', 'VALIDATION.md', 'LICENSE') {
+        foreach ($file in 'install.ps1', 'chatgpt-profile.ps1', 'taskbar-helper.ps1', 'taskbar-identity.cs', 'uninstall.ps1', 'README.md', 'CHANGELOG.md', 'VALIDATION.md', 'TROUBLESHOOTING.md', 'LICENSE') {
             Copy-Item -LiteralPath (Join-Path $repo $file) -Destination $src
         }
         Copy-Item -Path (Join-Path $repo 'tandem-chatgpt-desktop\*') -Destination (Join-Path $src 'tandem-chatgpt-desktop')
@@ -564,7 +574,7 @@ Describe 'install.ps1' {
 
     It 'installs the scripts, module and cmd shim' {
         $installExit | Should -Be 0
-        foreach ($file in 'chatgpt-profile.ps1', 'chatgpt-profile.cmd', 'taskbar-helper.ps1', 'taskbar-identity.cs', 'uninstall.ps1', 'README.md', 'CHANGELOG.md', 'VALIDATION.md', 'LICENSE',
+        foreach ($file in 'chatgpt-profile.ps1', 'chatgpt-profile.cmd', 'taskbar-helper.ps1', 'taskbar-identity.cs', 'uninstall.ps1', 'README.md', 'CHANGELOG.md', 'VALIDATION.md', 'TROUBLESHOOTING.md', 'LICENSE',
             'tandem-chatgpt-desktop\tandem-chatgpt-desktop.psd1', 'tandem-chatgpt-desktop\tandem-chatgpt-desktop.psm1') {
             Join-Path $dest $file | Should -Exist
         }
@@ -697,11 +707,35 @@ Describe 'Taskbar profile identities' {
 
 Describe 'Launch all accounts' {
     BeforeEach {
+        Mock -ModuleName tandem-chatgpt-desktop Test-DesktopWindow { $true }
+        Mock -ModuleName tandem-chatgpt-desktop Stop-Process { }
         $allRoot = Join-Path $TestDrive 'all profiles'
         $null = New-Item -ItemType Directory -Path $allRoot -Force
         Mock -ModuleName tandem-chatgpt-desktop Get-ChatGPTProfile { [pscustomobject]@{ Name = 'account2' } }
         Mock -ModuleName tandem-chatgpt-desktop Get-ProfileLayout { [pscustomobject]@{ Name = $Name; UserData = (Join-Path $Root "$Name\electron"); UserDataArg = ('--user-data-dir="' + (Join-Path $Root "$Name\electron") + '"') } }
         Mock -ModuleName tandem-chatgpt-desktop Start-ChatGPTProfile { [pscustomobject]@{ Name = $Name; Status = 'Started' } }
+    }
+
+    It 'reactivates a running hidden account instead of skipping it' {
+        $script:accountVisible = $false
+        Mock -ModuleName tandem-chatgpt-desktop Get-ChatGPTMainProcess {
+            [pscustomobject]@{ CommandLine = 'ChatGPT.exe'; ProcessId = 10 }
+            [pscustomobject]@{ CommandLine = ('ChatGPT.exe --user-data-dir="' + (Join-Path $allRoot 'account2\electron') + '"'); ProcessId = 20 }
+        }
+        Mock -ModuleName tandem-chatgpt-desktop Test-DesktopWindow { $Process.Count -gt 0 -and ($Process[0].ProcessId -ne 20 -or $script:accountVisible) }
+        Mock -ModuleName tandem-chatgpt-desktop Start-ChatGPTProfile { $script:accountVisible = $true; [pscustomobject]@{ Name = $Name; Status = 'AlreadyRunning' } }
+        $null = Start-ChatGPTAllAccounts -Root $allRoot -VerifySeconds 1
+        Should -Invoke -ModuleName tandem-chatgpt-desktop Start-ChatGPTProfile -Times 0 -ParameterFilter { $Name -eq 'main' }
+        Should -Invoke -ModuleName tandem-chatgpt-desktop Start-ChatGPTProfile -Times 1 -Exactly -ParameterFilter { $Name -eq 'account2' }
+        Get-Content (Join-Path $allRoot 'launcher-events.log') -Raw | Should -BeLike '*"state":"Hidden","action":"Activate"*'
+        Should -Invoke -ModuleName tandem-chatgpt-desktop Stop-Process -Times 0
+    }
+    It 'reports invisible processes as failures without stopping them' {
+        Mock -ModuleName tandem-chatgpt-desktop Get-ChatGPTMainProcess { }
+        Mock -ModuleName tandem-chatgpt-desktop Test-DesktopWindow { $false }
+        { Start-ChatGPTAllAccounts -Root $allRoot -VerifySeconds 1 } | Should -Throw '*no visible window*No accounts were stopped*'
+        Should -Invoke -ModuleName tandem-chatgpt-desktop Start-ChatGPTProfile -Times 2 -Exactly
+        Should -Invoke -ModuleName tandem-chatgpt-desktop Stop-Process -Times 0
     }
     It 'opens only missing accounts: <Scenario>' -ForEach @(
         @{ Scenario = 'neither open'; MainOpen = $false; ProfileOpen = $false; Starts = 2 }
@@ -751,6 +785,7 @@ Describe 'Launch all accounts' {
 
 Describe 'All Accounts shortcuts' {
     BeforeEach {
+        Mock -ModuleName tandem-chatgpt-desktop Get-LauncherIcon { 'C:\local\persistent.ico' }
         $shortcutRoot = Join-Path $TestDrive ('shortcuts root-' + [guid]::NewGuid())
         $shortcutFolder = Join-Path $TestDrive ('desktop-' + [guid]::NewGuid())
         $null = New-Item -ItemType Directory -Path $shortcutFolder -Force
@@ -785,5 +820,43 @@ Describe 'All Accounts shortcuts' {
         New-ChatGPTAllAccountsShortcut -Root $shortcutRoot -WhatIf
         $shortcutRoot | Should -Not -Exist
         @(Get-ChildItem -LiteralPath $shortcutFolder).Count | Should -Be 0
+    }
+}
+
+
+Describe 'Update safe launcher icons' {
+    BeforeEach {
+        $iconRoot = Join-Path $TestDrive ('icon-root-' + [guid]::NewGuid())
+        $vendorRoot = Join-Path $TestDrive ('vendor-version-' + [guid]::NewGuid())
+        $linkFolder = Join-Path $TestDrive ('links-' + [guid]::NewGuid())
+        $null = New-Item -ItemType Directory -Path $vendorRoot, $linkFolder
+        Set-Content (Join-Path $vendorRoot 'ChatGPT.exe') 'synthetic package'
+        Mock -ModuleName tandem-chatgpt-desktop Get-ShortcutFolder { $linkFolder }
+        Mock -ModuleName tandem-chatgpt-desktop Get-ChatGPTPackage { [pscustomobject]@{ Exe = (Join-Path $vendorRoot 'ChatGPT.exe') } }
+        Mock -ModuleName tandem-chatgpt-desktop Save-ProfileIcon {
+            $path = Join-Path $Layout.Dir 'icon-test.ico'
+            [IO.File]::WriteAllBytes($path, [byte[]]@(0, 0, 1, 0))
+            $path
+        }
+    }
+    It 'keeps Main and All Accounts icons valid after the vendor package is removed' {
+        $null = New-ChatGPTAllAccountsShortcut -Root $iconRoot
+        & (Get-Module tandem-chatgpt-desktop) { param($R) Save-MainTaskbarShortcut -Root $R -App (Get-ChatGPTPackage) } $iconRoot
+        Remove-Item -LiteralPath (Join-Path $vendorRoot 'ChatGPT.exe') -Force
+        $shell = New-Object -ComObject WScript.Shell
+        try {
+            foreach ($name in @('ChatGPT (Main).lnk', 'ChatGPT (All Accounts).lnk')) {
+                $link = $shell.CreateShortcut((Join-Path $linkFolder $name))
+                $icon = $link.IconLocation -replace ',0$', ''
+                $icon | Should -BeLike ($iconRoot + '\*')
+                $icon | Should -Exist
+            }
+        } finally { $null = [Runtime.InteropServices.Marshal]::ReleaseComObject($shell) }
+    }
+    It 'does not mistake a background process for a visible native window' {
+        InModuleScope tandem-chatgpt-desktop {
+            Test-DesktopWindow -Process @() | Should -BeFalse
+            Test-DesktopWindow -Process @([pscustomobject]@{ ProcessId = $PID }) | Should -BeFalse
+        }
     }
 }
