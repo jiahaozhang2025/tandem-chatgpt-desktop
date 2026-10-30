@@ -24,3 +24,9 @@ Look in `%USERPROFILE%\tandem-chatgpt-desktop`:
 * `taskbar.log`, if present: errors applying separate taskbar identities. This is distinct from an app failing to create a window.
 
 The new tests reproduce a background process without a window and an old package disappearing. Earlier process-only tests and checking already visible windows did not cover those cases. Window activation can still fail for another reason; an initialized process is left running on visibility timeout rather than being silently killed or reported as successfully opened.
+
+## Correct icon file but a stale displayed image
+
+Rewriting shortcut metadata alone can leave another Explorer view showing an old cached image. The launcher now sends a targeted SHCNE_UPDATEITEM notification with SHCNF_PATHW and SHCNF_FLUSH after shortcut creation or icon updates. It does not delete Windows icon databases or restart Explorer. If an icon still differs between Desktop, Start and taskbar, identify the affected surface: pinned copies and native app shortcuts can be distinct from the companion shortcuts.
+
+Native test windows now verify actual Windows visibility transitions and tool-window filtering. These regression checks exercise the causes observed here; they cannot prove that all future app or Windows releases will behave identically.

@@ -133,6 +133,14 @@ function Stop-ProfileTaskbarHelper {
     throw 'The taskbar helper is still stopping. Try again in a few seconds.'
 }
 
+function Update-ShortcutShell {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Private shell notification; shortcut creation caller checks ShouldProcess.')]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+    Initialize-TaskbarApi
+    [Tandem.ChatGPT.TaskbarIdentity]::NotifyShortcutChanged($Path)
+}
+
 function Set-ShortcutTaskbarIdentity {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Private helper; shortcut creation checks ShouldProcess.')]
     [CmdletBinding()]
@@ -180,6 +188,7 @@ function Save-MainTaskbarShortcut {
             $link.WindowStyle = 7
             $link.Description = 'Open the primary ChatGPT account'
             $link.Save()
+            Update-ShortcutShell -Path $path
             Set-ShortcutTaskbarIdentity -Path $path -Root $Root -Name main
             Copy-Item -LiteralPath $path -Destination (Join-Path $directory 'taskbar-launch.lnk') -Force
             $paths += $path
@@ -446,6 +455,7 @@ function Save-ProfileShortcut {
         $link.WindowStyle = 7
         $link.Description = "ChatGPT, separate profile '$($Layout.Name)'"
         $link.Save()
+        Update-ShortcutShell -Path $path
         Set-ShortcutTaskbarIdentity -Path $path -Root $Layout.Root -Name $Layout.Name
         if (Test-Path -LiteralPath (Join-Path $Layout.Root 'taskbar.json')) {
             Copy-Item -LiteralPath $path -Destination (Join-Path $Layout.Dir 'taskbar-launch.lnk') -Force
@@ -466,6 +476,7 @@ function Write-ShortcutIcon {
         $link = $shell.CreateShortcut($Path)
         $link.IconLocation = $Icon + ',0'
         $link.Save()
+        Update-ShortcutShell -Path $path
     } finally {
         $null = [Runtime.InteropServices.Marshal]::ReleaseComObject($shell)
     }
@@ -883,6 +894,7 @@ function New-ChatGPTAllAccountsShortcut {
             $link.WindowStyle = 7
             $link.Description = 'Open all ChatGPT accounts; leave running accounts untouched'
             $link.Save()
+            Update-ShortcutShell -Path $path
             $paths += $path
         }
     } finally { $null = [Runtime.InteropServices.Marshal]::ReleaseComObject($shell) }
