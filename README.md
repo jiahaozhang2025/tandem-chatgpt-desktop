@@ -140,6 +140,8 @@ To move profiles, stop them, move the folder, and run `chatgpt-profile new <name
 - The profile folder path must be ASCII-only and must not contain `%`, because `cmd.exe` can't pass those reliably. If your Windows user folder has other characters, use `-Root C:\tandem-chatgpt-desktop`.
 - Windows only, and only the current ChatGPT app, not ChatGPT Classic.
 
+Taskbar identity schema v2 also repairs icons owned by a previous helper process. Desktop, Start menu and private account links are refreshed on installation. If you retained an old pinned shortcut independently, repin the refreshed account shortcut to use the v2 identity.
+
 ## Uninstall
 
 ```powershell

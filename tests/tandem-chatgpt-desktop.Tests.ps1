@@ -681,7 +681,10 @@ Describe 'Taskbar profile identities' {
             try {
                 $handle = $form.Handle
                 $original = [Tandem.ChatGPT.TaskbarIdentity]::ReadWindow($handle, 5)
-                [Tandem.ChatGPT.TaskbarIdentity]::Apply($handle, 'Tandem.ChatGPT.Test', 'synthetic.exe', 'Synthetic profile', 'nonexistent-test.ico')
+                $iconPath = Join-Path (Get-PSDrive TestDrive).Root 'window-icon.ico'
+                $stream = [IO.File]::Create($iconPath)
+                try { [Drawing.SystemIcons]::Information.Save($stream) } finally { $stream.Dispose() }
+                [Tandem.ChatGPT.TaskbarIdentity]::Apply($handle, 'Tandem.ChatGPT.Test', 'synthetic.exe', 'Synthetic profile', $iconPath)
                 [Tandem.ChatGPT.TaskbarIdentity]::ReadWindow($handle, 5) | Should -Be 'Tandem.ChatGPT.Test'
                 [Tandem.ChatGPT.TaskbarIdentity]::ReadWindow($handle, 2) | Should -Be 'synthetic.exe'
                 [Tandem.ChatGPT.TaskbarIdentity]::ReadWindow($handle, 4) | Should -Be 'Synthetic profile'
@@ -910,6 +913,67 @@ Describe 'Shell refresh and real window lifecycle' {
                 { Update-ShortcutShell -Path $path } | Should -Not -Throw
                 $shell.CreateShortcut($path).Arguments | Should -Be 'synthetic.txt'
             } finally { $null = [Runtime.InteropServices.Marshal]::ReleaseComObject($shell) }
+        }
+    }
+}
+
+
+Describe 'Taskbar helper icon lifetime' {
+    It 'repairs inherited properties after the icon-owning helper exits: <OldId>' -ForEach @(
+        @{ OldId = 'Tandem.Lifetime.Test'; NewId = 'Tandem.Lifetime.Test' }
+        @{ OldId = 'Tandem.ChatGPT.old.main'; NewId = 'Tandem.ChatGPT.v2.main' }
+    ) {
+        if (-not ('TandemWindowFixture' -as [type])) { Add-Type -Path (Join-Path $PSScriptRoot 'WindowFixture.cs') }
+        $library = Join-Path $PSScriptRoot '..\taskbar-identity.cs'
+        InModuleScope tandem-chatgpt-desktop -Parameters @{ R = $TestDrive; Library = $library; Old = $OldId; Current = $NewId } {
+            param($R, $Library, $Old, $Current)
+            Initialize-TaskbarApi
+            Add-Type -AssemblyName System.Windows.Forms
+            $window = [TandemWindowFixture]::Create($false)
+            $icon = Join-Path $R 'lifetime.ico'
+            $stream = [IO.File]::Create($icon)
+            try { [Drawing.SystemIcons]::Information.Save($stream) } finally { $stream.Dispose() }
+            $script = Join-Path $R 'transient-helper.ps1'
+            @'
+param([long]$Window, [string]$Library, [string]$Icon, [string]$Identity)
+Add-Type -Path $Library
+[Tandem.ChatGPT.TaskbarIdentity]::Apply([intptr]$Window, $Identity, 'synthetic.exe', 'Synthetic', $Icon)
+# Deliberately exit without RestoreAll, as if the resident helper had crashed.
+'@ | Set-Content -LiteralPath $script -Encoding UTF8
+            $helper = $null
+            try {
+                $exe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+                $helper = Start-Process -FilePath $exe -WindowStyle Hidden -PassThru -ArgumentList ('-NoProfile -ExecutionPolicy Bypass -File "{0}" -Window {1} -Library "{2}" -Icon "{3}" -Identity "{4}"' -f $script, [long]$window, $Library, $icon, $Old)
+                $limit = (Get-Date).AddSeconds(25)
+                while (-not $helper.WaitForExit(20)) {
+                    [Windows.Forms.Application]::DoEvents()
+                    if ((Get-Date) -gt $limit) { throw 'Synthetic helper timed out' }
+                }
+                $helper.ExitCode | Should -Be 0
+                [Tandem.ChatGPT.TaskbarIdentity]::ReadWindow($window, 5) | Should -Be $Old
+                [Tandem.ChatGPT.TaskbarIdentity]::WindowIconsValid($window) | Should -BeFalse
+                [Tandem.ChatGPT.TaskbarIdentity]::NeedsApply($window, $Current, $icon) | Should -BeTrue
+                [Tandem.ChatGPT.TaskbarIdentity]::Apply($window, $Current, 'synthetic.exe', 'Synthetic', $icon)
+                [Tandem.ChatGPT.TaskbarIdentity]::WindowIconsValid($window) | Should -BeTrue
+                [Tandem.ChatGPT.TaskbarIdentity]::NeedsApply($window, $Current, $icon) | Should -BeFalse
+                [Tandem.ChatGPT.TaskbarIdentity]::RestoreAll()
+                [Tandem.ChatGPT.TaskbarIdentity]::ReadWindow($window, 5) | Should -BeNullOrEmpty
+            } finally {
+                if ($null -ne $helper -and -not $helper.HasExited) { $helper.Kill() }
+                [Tandem.ChatGPT.TaskbarIdentity]::RestoreAll()
+                $null = [TandemWindowFixture]::DestroyWindow($window)
+            }
+        }
+    }
+    It 'rejects an invalid icon file before changing taskbar metadata' {
+        if (-not ('TandemWindowFixture' -as [type])) { Add-Type -Path (Join-Path $PSScriptRoot 'WindowFixture.cs') }
+        InModuleScope tandem-chatgpt-desktop {
+            Initialize-TaskbarApi
+            $window = [TandemWindowFixture]::Create($false)
+            try {
+                { [Tandem.ChatGPT.TaskbarIdentity]::Apply($window, 'Synthetic.Invalid', 'synthetic.exe', 'Synthetic', 'no-such-icon.ico') } | Should -Throw '*Could not load taskbar icons*'
+                [Tandem.ChatGPT.TaskbarIdentity]::ReadWindow($window, 5) | Should -BeNullOrEmpty
+            } finally { $null = [TandemWindowFixture]::DestroyWindow($window) }
         }
     }
 }

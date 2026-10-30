@@ -39,8 +39,7 @@ try {
             $managed++
             foreach ($window in [Tandem.ChatGPT.TaskbarIdentity]::WindowsForProcess([uint32]$process.ProcessId)) {
                 try {
-                    if ([Tandem.ChatGPT.TaskbarIdentity]::ReadWindow($window, 5) -ne $matchedProfile.AppId -or
-                        [Tandem.ChatGPT.TaskbarIdentity]::ReadWindow($window, 3) -ne ($matchedProfile.Icon + ',0')) {
+                    if ([Tandem.ChatGPT.TaskbarIdentity]::NeedsApply($window, $matchedProfile.AppId, $matchedProfile.Icon)) {
                         [Tandem.ChatGPT.TaskbarIdentity]::Apply($window, $matchedProfile.AppId, $matchedProfile.Command, $matchedProfile.Label, $matchedProfile.Icon)
                     }
                 } catch {

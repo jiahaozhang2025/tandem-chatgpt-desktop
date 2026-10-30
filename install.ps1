@@ -60,6 +60,10 @@ if ($PSCmdlet.ShouldProcess($destinationPath, 'Install chatgpt-profile')) {
             param($R)
             if (-not $R) { $R = Get-DefaultProfileRoot }
             Save-MainTaskbarShortcut -Root (Resolve-ProfileRoot $R) -App (Get-ChatGPTPackage)
+            # Refresh account links too when the shell identity schema changes.
+            foreach ($managedProfile in @(Get-ChatGPTProfile -Root (Resolve-ProfileRoot $R))) {
+                $null = New-ChatGPTProfile -Name $managedProfile.Name -Root (Resolve-ProfileRoot $R) -Label $managedProfile.Label
+            }
             Start-ProfileTaskbarHelper -Root (Resolve-ProfileRoot $R)
         } $Root
     }
